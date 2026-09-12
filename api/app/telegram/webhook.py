@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import uuid
 from typing import Any
 
-from .. import db, pipeline
+from .. import db, pipeline, settings_store
 from ..agents.base import AgentError
 from ..rubric import format_rubric_for_grader
 from . import client as tg
 from . import enroll, sessions
-from .. import settings_store
 
 log = logging.getLogger("nirikkha.telegram.webhook")
 
@@ -93,8 +93,8 @@ async def handle_update(update: dict[str, Any]) -> None:
                         "order": "line_index.asc",
                     },
                 )
-                from ..pipeline import needs_clarification
                 from ..config import settings
+                from ..pipeline import needs_clarification
 
                 flagged = [
                     line
@@ -118,13 +118,11 @@ async def handle_update(update: dict[str, Any]) -> None:
                         "error": str(exc)[:500],
                     },
                 )
-                try:
+                with contextlib.suppress(Exception):
                     await tg.send_message(
                         chat["id"],
                         "Clarification প্রসেস ব্যর্থ। শিক্ষক পোর্টালে দেখবেন।",
                     )
-                except Exception:
-                    pass
             return
 
     photos = message.get("photo") or []
@@ -179,10 +177,8 @@ async def _pending_clarification(telegram_user_id: str) -> dict[str, Any] | None
 
 
 async def _answer_callback(query_id: str, text: str, show_alert: bool = False) -> None:
-    try:
+    with contextlib.suppress(Exception):
         await tg.answer_callback_query(query_id, text, show_alert=show_alert)
-    except Exception:
-        pass
 
 
 async def _handle_callback(query: dict[str, Any]) -> None:
@@ -503,7 +499,7 @@ async def _handle_group_photo(
 ) -> None:
     group = await db.select_one(
         "telegram_groups",
-        params={"chat_id": f"eq.{str(chat_id)}", "select": "*"},
+        params={"chat_id": f"eq.{chat_id!s}", "select": "*"},
     )
     if not group:
         await tg.send_message(

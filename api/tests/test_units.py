@@ -237,11 +237,11 @@ def test_grade_result_requires_all_four_parts():
 def test_exam_code_shape(monkeypatch):
     monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "unit-test-key-not-for-prod")
     from app.rubric import (
+        DEFAULT_CQ_RUBRIC,
         generate_exam_code,
         is_valid_rubric,
         normalize_rubric,
         rubric_max_by_part,
-        DEFAULT_CQ_RUBRIC,
     )
 
     code = generate_exam_code()

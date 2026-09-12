@@ -191,8 +191,8 @@ async def provision_telegram_user(
 
     Returns the auth user id. Email is synthetic so student_id stays required.
     """
-    from ..config import settings
     from .. import db as database
+    from ..config import settings
 
     email = f"tg_{telegram_user_id}@bot.local"
     # Look up an existing profile first.
