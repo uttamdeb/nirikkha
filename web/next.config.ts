@@ -8,6 +8,12 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
   },
+  // Marking a script takes 20-60s through a vision model, and the default proxy
+  // timeout is far shorter — the request was being cut off mid-pipeline and
+  // surfacing as "socket hang up". Match the Cloud Run request timeout instead.
+  experimental: {
+    proxyTimeout: 900_000,
+  },
   // Dual-process container: Next on $PORT, FastAPI on 8100.
   async rewrites() {
     return [
