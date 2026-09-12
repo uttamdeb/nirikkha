@@ -37,7 +37,7 @@ api/app/
   pipeline.py         read → gate → grade → review → release
   mcp.py              MCP server (4 tools)
   main.py             HTTP surface, auth, teacher panel, static hosting
-web/src/              React, Bangla-first with an English mirror, runtime-configured
+web/                  Next.js App Router, Bangla-first with an English mirror, runtime-configured
 supabase/migrations/  schema and RLS
 scripts/set_role.py   grant the teacher role
 ```
@@ -83,8 +83,9 @@ truth and the prompts are generated from it.
   score, cap free text. `agents/base.py`.
 - **A status reads differently depending on who is looking.** "Needs your help" is
   addressed to the student; a teacher sees "Waiting on the student". `statusKey()`.
-- **Client config is fetched at runtime** from `/api/config`, not inlined by Vite, so one
-  image runs in any environment. Do not reintroduce `VITE_SUPABASE_*` build args.
+- **Client config is fetched at runtime** from `/api/config`, not baked into the Next
+  build, so one image runs in any environment. Do not reintroduce `NEXT_PUBLIC_SUPABASE_*`
+  as required deploy build args.
 - **Comments explain why, not what**, and carry no reference to internal or third-party
   products — this repo is public.
 

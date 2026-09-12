@@ -122,6 +122,8 @@ that HTTPS origin, then use **Settings → Save & connect webhook**. Apply
 
 ```bash
 cd web && npm install && npm run dev
+# In another terminal, run the API (Next rewrites /api → :8100):
+cd api && uvicorn app.main:app --reload --port 8100
 ```
 
 ## Granting the teacher role
@@ -154,7 +156,7 @@ api/app/
   pipeline.py   read → gate → grade → review → release
   mcp.py        MCP server
   main.py       HTTP surface, auth, static hosting
-web/src/        React, Bangla-first, runtime-configured
+web/            Next.js App Router, Bangla-first, runtime-configured
 supabase/       schema and RLS
 ```
 
