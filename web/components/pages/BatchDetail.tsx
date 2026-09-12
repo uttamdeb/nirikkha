@@ -4,6 +4,29 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ApiError, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
+import { EmptyState } from "@/components/feedback/empty-state";
+import { LoadingBlock } from "@/components/feedback/loading-block";
+import { StatusBadge } from "@/components/feedback/status-badge";
+import { PageShell } from "@/components/layout/page-shell";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { usePrefs } from "@/lib/i18n";
 
 type Member = {
@@ -24,10 +47,11 @@ type BatchDetail = {
 
 export default function BatchDetailPage() {
   const params = useParams<{ id: string }>();
-  const id = typeof params.id === 'string' ? params.id : params.id?.[0];
+  const id = typeof params.id === "string" ? params.id : params.id?.[0];
   const { t } = usePrefs();
   const [batch, setBatch] = useState<BatchDetail | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
 
@@ -48,14 +72,22 @@ export default function BatchDetailPage() {
 
   useEffect(() => {
     void load();
-  }, [id]);
+  }, [id, t]);
+
+  function getExamStatusLabel(status: string): string {
+    if (status === "published") return t("published");
+    if (status === "closed") return t("closed");
+    return t("draft");
+  }
 
   async function sync(postEnroll: boolean) {
     if (!id) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await apiPost(`/api/teacher/batches/${id}/sync-members`, { post_enroll: postEnroll });
+      setNotice(t("syncMembers"));
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("saveFailed"));
@@ -68,8 +100,10 @@ export default function BatchDetailPage() {
     if (!id) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await apiPut(`/api/teacher/batches/${id}/sync-members`);
+      setNotice(t("postRegister"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("saveFailed"));
     } finally {
@@ -80,80 +114,165 @@ export default function BatchDetailPage() {
   async function saveNumber(memberId: string) {
     if (!id) return;
     const raw = edits[memberId];
-    const student_number = raw.trim() === "" ? null : Number(raw);
+    const trimmed = raw.trim();
+    const student_number = trimmed === "" ? null : Number.parseInt(trimmed, 10);
+    if (
+      trimmed !== "" &&
+      (!Number.isFinite(student_number) || student_number === null || student_number < 1)
+    ) {
+      setError(t("saveFailed"));
+      return;
+    }
+    setError("");
+    setNotice("");
     try {
       await apiPatch(`/api/teacher/batches/${id}/members/${memberId}`, { student_number });
+      setNotice(t("saveLine"));
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("saveFailed"));
     }
   }
 
-  if (!batch) {
-    return (
-      <div className="stack">
-        <Link href="/batches">{t("back")}</Link>
-        {error ? <p className="error">{error}</p> : <span className="spin" />}
+  const content = !batch ? (
+    error ? (
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    ) : (
+      <LoadingBlock rows={5} className="max-w-none" />
+    )
+  ) : (
+    <div className="space-y-4">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {notice ? (
+        <Alert>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" disabled={busy} onClick={() => void sync(true)}>
+          {t("syncMembers")}
+        </Button>
+        <Button type="button" variant="outline" disabled={busy} onClick={() => void postRegister()}>
+          {t("postRegister")}
+        </Button>
       </div>
-    );
-  }
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("members")}</CardTitle>
+          <CardDescription>{t("membersLede")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {batch.members.length === 0 ? (
+            <EmptyState
+              title={t("membersEmptyTitle")}
+              description={t("membersEmptyDescription")}
+              className="border-0 bg-transparent px-0 py-6 shadow-none"
+            />
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-border/70">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("studentNumber")}</TableHead>
+                    <TableHead>{t("tableName")}</TableHead>
+                    <TableHead>{t("tableTelegramId")}</TableHead>
+                    <TableHead>{t("tableRole")}</TableHead>
+                    <TableHead className="text-right">{t("saveLine")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {batch.members.map((member) => (
+                    <TableRow key={member.id}>
+                      <TableCell className="w-28">
+                        <Input
+                          value={edits[member.id] ?? ""}
+                          onChange={(event) =>
+                            setEdits((prev) => ({
+                              ...prev,
+                              [member.id]: event.target.value,
+                            }))
+                          }
+                          disabled={member.is_group_admin}
+                          inputMode="numeric"
+                        />
+                      </TableCell>
+                      <TableCell className="font-medium">{member.display_name}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {member.telegram_user_id}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={member.is_group_admin ? "default" : "secondary"}>
+                          {member.is_group_admin ? t("adminRole") : t("studentRole")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {!member.is_group_admin ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void saveNumber(member.id)}
+                          >
+                            {t("saveLine")}
+                          </Button>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {batch.exams.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("relatedExams")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {batch.exams.map((exam) => (
+              <Link
+                key={exam.id}
+                href={`/exams/${exam.id}`}
+                className="flex flex-col gap-2 rounded-xl border border-border/70 bg-muted/20 p-4 transition hover:border-teal/40 hover:shadow-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="space-y-1">
+                  <p className="font-medium">{exam.title}</p>
+                  <p className="text-xs text-muted-foreground">{exam.exam_code || "—"}</p>
+                </div>
+                <StatusBadge
+                  status={exam.status}
+                  label={getExamStatusLabel(exam.status)}
+                />
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+    </div>
+  );
 
   return (
-    <div className="stack">
-      <Link href="/batches">{t("back")}</Link>
-      <div>
-        <h1>{batch.name}</h1>
-        <p className="muted">{batch.telegram_group?.title || t("noGroup")}</p>
-      </div>
-
-      {error && <p className="error">{error}</p>}
-
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <button className="primary small" disabled={busy} onClick={() => void sync(true)}>
-          {t("syncMembers")}
-        </button>
-        <button className="ghost small" disabled={busy} onClick={() => void postRegister()}>
-          {t("postRegister")}
-        </button>
-      </div>
-
-      <section className="card stack">
-        <h2>{t("members")}</h2>
-        {batch.members.map((m) => (
-          <div key={m.id} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <div style={{ minWidth: 160 }}>
-              <strong>{m.display_name}</strong>
-              {m.is_group_admin && <span className="pill" style={{ marginInlineStart: 6 }}>admin</span>}
-              <div className="muted" style={{ fontSize: 12 }}>{m.telegram_user_id}</div>
-            </div>
-            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {t("studentNumber")}
-              <input
-                style={{ width: 72 }}
-                value={edits[m.id] ?? ""}
-                onChange={(e) => setEdits((prev) => ({ ...prev, [m.id]: e.target.value }))}
-                disabled={m.is_group_admin}
-              />
-            </label>
-            {!m.is_group_admin && (
-              <button className="ghost small" type="button" onClick={() => void saveNumber(m.id)}>
-                {t("saveLine")}
-              </button>
-            )}
-          </div>
-        ))}
-      </section>
-
-      {batch.exams.length > 0 && (
-        <section className="card stack">
-          <h2>{t("examsTitle")}</h2>
-          {batch.exams.map((exam) => (
-            <Link key={exam.id} href={`/exams/${exam.id}`}>
-              {exam.title} · {exam.exam_code || "—"} · {exam.status}
-            </Link>
-          ))}
-        </section>
-      )}
-    </div>
+    <PageShell
+      title={batch?.name ?? t("batchesTitle")}
+      description={batch?.telegram_group?.title || t("noGroup")}
+      breadcrumbs={[
+        { label: t("batchesTitle"), href: "/batches" },
+        { label: batch?.name ?? t("actionOpen") },
+      ]}
+    >
+      {content}
+    </PageShell>
   );
 }

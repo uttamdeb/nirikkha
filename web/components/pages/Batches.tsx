@@ -2,25 +2,64 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { UsersIcon } from "lucide-react";
+import { EmptyState } from "@/components/feedback/empty-state";
+import { LoadingBlock } from "@/components/feedback/loading-block";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ApiError, apiGet, apiPost } from "@/lib/api";
 import { usePrefs } from "@/lib/i18n";
 
-type TelegramGroup = { id: string; chat_id: string; title: string };
-type BatchRow = {
+interface TelegramGroup {
+  id: string;
+  chat_id: string;
+  title: string;
+}
+
+interface BatchRow {
   id: string;
   name: string;
   telegram_group: TelegramGroup | null;
   _count: { members: number; students: number; exams: number };
-};
+}
 
 export default function BatchesPage() {
   const { t } = usePrefs();
-  const [batches, setBatches] = useState<BatchRow[]>([]);
+  const [batches, setBatches] = useState<BatchRow[] | null>(null);
   const [groups, setGroups] = useState<TelegramGroup[]>([]);
   const [name, setName] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function load() {
     try {
@@ -32,6 +71,7 @@ export default function BatchesPage() {
       setGroups(g.groups);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("loadFailed"));
+      setBatches([]);
     }
   }
 
@@ -42,9 +82,11 @@ export default function BatchesPage() {
   async function refreshGroups() {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const g = await apiPost<{ groups: TelegramGroup[] }>("/api/teacher/telegram/groups");
       setGroups(g.groups);
+      setNotice(t("refreshGroups"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("loadFailed"));
     } finally {
@@ -57,6 +99,7 @@ export default function BatchesPage() {
     if (!name.trim()) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await apiPost("/api/teacher/batches", {
         name: name.trim(),
@@ -64,6 +107,8 @@ export default function BatchesPage() {
       });
       setName("");
       setGroupId("");
+      setOpen(false);
+      setNotice(t("createBatch"));
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("saveFailed"));
@@ -72,56 +117,134 @@ export default function BatchesPage() {
     }
   }
 
+  if (!batches) return <LoadingBlock rows={5} className="max-w-none" />;
+
   return (
-    <div className="stack">
-      <div>
-        <h1>{t("batchesTitle")}</h1>
-        <p className="lede">{t("batchesLede")}</p>
-      </div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" onClick={() => void refreshGroups()}>
+          {t("refreshGroups")}
+        </Button>
 
-      {error && <p className="error">{error}</p>}
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button>{t("createBatch")}</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <form className="space-y-4" onSubmit={create}>
+              <DialogHeader>
+                <DialogTitle>{t("createBatch")}</DialogTitle>
+                <DialogDescription>{t("createBatchLede")}</DialogDescription>
+              </DialogHeader>
 
-      <form className="card stack" onSubmit={create}>
-        <label>
-          {t("batchName")}
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
-        <label>
-          {t("telegramGroup")}
-          <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-            <option value="">{t("noGroup")}</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="row" style={{ gap: 8 }}>
-          <button className="primary" disabled={busy} type="submit">
-            {t("createBatch")}
-          </button>
-          <button className="ghost" type="button" disabled={busy} onClick={() => void refreshGroups()}>
-            {t("refreshGroups")}
-          </button>
-        </div>
-      </form>
-
-      <div className="stack">
-        {batches.map((batch) => (
-          <Link key={batch.id} href={`/batches/${batch.id}`} className="card row">
-            <div>
-              <strong>{batch.name}</strong>
-              <div className="muted" style={{ fontSize: 13 }}>
-                {batch.telegram_group?.title || t("noGroup")} ·{" "}
-                {t("studentsCount", { n: batch._count.students })}
+              <div className="space-y-2">
+                <Label htmlFor="batch-name">{t("batchName")}</Label>
+                <Input
+                  id="batch-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
               </div>
-            </div>
-            <span className="spacer" />
-            <span className="muted">→</span>
-          </Link>
-        ))}
+
+              <div className="space-y-2">
+                <Label htmlFor="batch-group">{t("telegramGroup")}</Label>
+                <Select
+                  value={groupId || "none"}
+                  onValueChange={(value) => setGroupId(value === "none" ? "" : value)}
+                >
+                  <SelectTrigger id="batch-group" className="w-full rounded-lg bg-card">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t("noGroup")}</SelectItem>
+                    {groups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <DialogFooter>
+                <Button type="submit" disabled={busy || !name.trim()}>
+                  {t("createBatch")}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
+
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {notice ? (
+        <Alert>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {batches.length === 0 ? (
+        <EmptyState
+          icon={<UsersIcon className="size-5" />}
+          title={t("batchesEmptyTitle")}
+          description={t("batchesEmptyDescription")}
+          action={
+            <Button type="button" onClick={() => setOpen(true)}>
+              {t("createBatch")}
+            </Button>
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("tableName")}</TableHead>
+                <TableHead>{t("tableGroup")}</TableHead>
+                <TableHead>{t("tableStudents")}</TableHead>
+                <TableHead>{t("tableMembers")}</TableHead>
+                <TableHead>{t("tableExams")}</TableHead>
+                <TableHead className="text-right">{t("actionOpen")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {batches.map((batch) => (
+                <TableRow key={batch.id}>
+                  <TableCell className="font-medium">
+                    <Link
+                      href={`/batches/${batch.id}`}
+                      className="transition-colors hover:text-teal"
+                    >
+                      {batch.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    {batch.telegram_group ? (
+                      <Badge variant="outline">{batch.telegram_group.title}</Badge>
+                    ) : (
+                      t("noGroup")
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{batch._count.students}</TableCell>
+                  <TableCell className="tabular-nums">{batch._count.members}</TableCell>
+                  <TableCell className="tabular-nums">{batch._count.exams}</TableCell>
+                  <TableCell className="text-right">
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/batches/${batch.id}`}>{t("actionOpen")}</Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 }

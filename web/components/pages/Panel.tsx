@@ -1,342 +1,301 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ApiError,
   apiGet,
-  apiPost,
   type PanelPage,
   type PanelRow,
-  type TeacherStats,
 } from "@/lib/api";
-import { formatDate, statusKey, usePrefs } from "@/lib/i18n";
+import { usePrefs } from "@/lib/i18n";
+import { MetricTile } from "@/components/metric-tile";
+import { ReviewQueueCard } from "@/components/review-queue-card";
+import { EmptyState } from "@/components/feedback/empty-state";
+import { StatusBadge } from "@/components/feedback/status-badge";
+import { LoadingBlock } from "@/components/feedback/loading-block";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
+import {
+  BookOpenIcon,
+  BotIcon,
+  CheckCircle2Icon,
+  CircleAlertIcon,
+  ClipboardCheckIcon,
+  SparklesIcon,
+  UsersIcon,
+} from "lucide-react";
 
-const STATUSES = [
-  "all",
-  "awaiting_teacher",
-  "awaiting_student",
-  "released",
-  "failed",
-  "received",
-] as const;
+type SettingsBrief = {
+  bot_connected?: boolean;
+  bot_username?: string | null;
+  publish_mode?: string | null;
+  ai_from_env?: boolean;
+};
 
 export default function PanelPageView() {
   const { t } = usePrefs();
-  const [page, setPage] = useState<PanelPage | null>(null);
-  const [stats, setStats] = useState<TeacherStats | null>(null);
-  const [status, setStatus] = useState<string>("all");
-  const [flagged, setFlagged] = useState(false);
-  const [query, setQuery] = useState("");
-  const [examId, setExamId] = useState("");
-  const [batchId, setBatchId] = useState("");
-  const [exams, setExams] = useState<{ id: string; title: string }[]>([]);
-  const [batches, setBatches] = useState<{ id: string; name: string }[]>([]);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<PanelRow[]>([]);
-  const [offset, setOffset] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(0);
+  const [examCount, setExamCount] = useState(0);
+  const [batchCount, setBatchCount] = useState(0);
+  const [settings, setSettings] = useState<SettingsBrief | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
-  const PAGE = 50;
-
-  const fetchPage = useCallback(
-    async (from: number) => {
-      const params = new URLSearchParams({ limit: String(PAGE), offset: String(from) });
-      if (status !== "all") params.set("status", status);
-      if (flagged) params.set("flagged", "true");
-      if (query.trim()) params.set("q", query.trim());
-      if (examId) params.set("exam_id", examId);
-      if (batchId) params.set("batch_id", batchId);
-      return apiGet<PanelPage>(`/api/teacher/panel?${params}`);
-    },
-    [status, flagged, query, examId, batchId],
-  );
-
-  const load = useCallback(async () => {
-    try {
-      const first = await fetchPage(0);
-      setPage(first);
-      setRows(first.rows);
-      setOffset(0);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("loadFailed"));
-    }
-  }, [fetchPage, t]);
-
-  async function loadMore() {
-    setLoadingMore(true);
-    try {
-      const next = await fetchPage(offset + PAGE);
-      setPage(next);
-      // Append rather than replace, so scrolling through a long queue does not
-      // lose what is already on screen.
-      setRows((prev) => [...prev, ...next.rows]);
-      setOffset(offset + PAGE);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("loadFailed"));
-    } finally {
-      setLoadingMore(false);
-    }
-  }
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Debounced so typing in the search box does not fire a request per keystroke.
-    const timer = setTimeout(() => void load(), query ? 300 : 0);
-    return () => clearTimeout(timer);
-  }, [load, query]);
+    let active = true;
+    (async () => {
+      try {
+        const [panel, exams, batches, org] = await Promise.all([
+          apiGet<PanelPage>(
+            "/api/teacher/panel?limit=12&offset=0&status=awaiting_teacher"
+          ).catch(() =>
+            apiGet<PanelPage>("/api/teacher/panel?limit=12&offset=0")
+          ),
+          apiGet<{ exams: { id: string }[] }>("/api/teacher/exams").catch(
+            () => ({ exams: [] })
+          ),
+          apiGet<{ batches: { id: string }[] }>("/api/teacher/batches").catch(
+            () => ({ batches: [] })
+          ),
+          apiGet<SettingsBrief>("/api/teacher/settings").catch(() => null),
+        ]);
+        if (!active) return;
 
-  useEffect(() => {
-    apiGet<TeacherStats>("/api/teacher/stats").then(setStats).catch(() => setStats(null));
-    apiGet<{ exams: { id: string; title: string }[] }>("/api/teacher/exams")
-      .then((d) => setExams(d.exams))
-      .catch(() => setExams([]));
-    apiGet<{ batches: { id: string; name: string }[] }>("/api/teacher/batches")
-      .then((d) => setBatches(d.batches))
-      .catch(() => setBatches([]));
-  }, []);
+        const queue = [...panel.rows].sort((a, b) => {
+          const aNeed =
+            a.status === "awaiting_teacher" || a.needs_human_review ? 0 : 1;
+          const bNeed =
+            b.status === "awaiting_teacher" || b.needs_human_review ? 0 : 1;
+          if (aNeed !== bNeed) return aNeed - bNeed;
+          return (b.created_at || "").localeCompare(a.created_at || "");
+        });
 
-  // Only a marked, non-stale script can be released, so anything else is not
-  // offered for selection — better than letting a teacher pick thirty and
-  // discover afterwards that eleven were skipped.
-  const releasable = useMemo(
-    () => rows.filter((r) => r.status === "awaiting_teacher" && !r.marks_stale),
-    [rows],
-  );
+        setRows(queue);
+        setPending(
+          panel.counts?.awaiting_teacher ??
+            queue.filter(
+              (r) => r.status === "awaiting_teacher" || r.needs_human_review
+            ).length
+        );
+        setExamCount(exams.exams.length);
+        setBatchCount(batches.batches.length);
+        setSettings(org);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof ApiError ? err.message : t("loadFailed"));
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [t]);
 
-  async function releaseSelected() {
-    if (picked.size === 0) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const res = await apiPost<{ released_count: number; skipped_count: number }>(
-        "/api/teacher/release",
-        { submission_ids: [...picked] },
-      );
-      setNotice(
-        `${t("releasedN", { n: res.released_count })}` +
-          (res.skipped_count ? ` · ${t("skippedN", { n: res.skipped_count })}` : ""),
-      );
-      setPicked(new Set());
-      await load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("genericError"));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const botOk = Boolean(settings?.bot_connected);
+  const aiOk = settings?.ai_from_env !== false;
+  const ready = botOk && aiOk;
+  const setupDone = [botOk, aiOk].filter(Boolean).length;
 
-  function toggle(id: string) {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
+  if (loading) return <LoadingBlock rows={5} />;
 
   return (
-    <>
-      <h1>{t("panelTitle")}</h1>
-      <p className="lede">{t("panelLede")}</p>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0 space-y-6">
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      {error && <div className="banner err">{error}</div>}
-      {notice && <div className="banner ok">{notice}</div>}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <MetricTile
+            label={t("pendingReview")}
+            value={pending}
+            hint={t("waitingOnTeacher")}
+            icon={<ClipboardCheckIcon className="size-4" />}
+            tone={pending > 0 ? "amber" : "default"}
+          />
+          <MetricTile
+            label={t("examsMetric")}
+            value={examCount}
+            hint={t("examsMetricHint")}
+            icon={<BookOpenIcon className="size-4" />}
+          />
+          <MetricTile
+            label={t("batchesMetric")}
+            value={batchCount}
+            hint={t("batchesMetricHint")}
+            icon={<UsersIcon className="size-4" />}
+          />
+        </div>
 
-      {stats && stats.scored > 0 && (
-        <div className="card">
-          <h2>{t("statsTitle")}</h2>
-          <div className="stat-row">
-            <div className="stat">
-              <span className="k">{t("statAverage")}</span>
-              <span className="v">
-                {stats.average}
-                <small>/10</small>
-              </span>
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="font-heading text-lg font-semibold">
+                {t("reviewQueue")}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {t("reviewQueueLede")}
+              </p>
             </div>
-            <div className="stat">
-              <span className="k">{t("statHighest")}</span>
-              <span className="v ok">
-                {stats.highest}
-                <small>/10</small>
-              </span>
-            </div>
-            <div className="stat">
-              <span className="k">{t("statOverride")}</span>
-              <span className="v warn">{Math.round((stats.override_rate ?? 0) * 100)}%</span>
-            </div>
+            {pending > 0 ? (
+              <StatusBadge
+                status="awaiting_teacher"
+                label={t("waitingCount", { n: pending })}
+              />
+            ) : null}
           </div>
 
-          <h3 style={{ marginTop: 18 }}>{t("weaknesses")}</h3>
-          {Object.entries(stats.per_part)
-            .sort((a, b) => (a[1].accuracy ?? 1) - (b[1].accuracy ?? 1))
-            .map(([key, part]) => (
-              <div key={key} className="bar-row">
-                <span className="bar-label">
-                  <strong>{part.bangla}</strong> {part.skill}
-                </span>
-                <span className="bar-track">
-                  <span
-                    className="bar-fill"
-                    style={{
-                      width: `${Math.round((part.accuracy ?? 0) * 100)}%`,
-                      background:
-                        (part.accuracy ?? 0) < 0.7 ? "var(--amber)" : "var(--green)",
-                    }}
-                  />
-                </span>
-                <span className="bar-value">
-                  {t("classAccuracy", { p: Math.round((part.accuracy ?? 0) * 100) })}
-                </span>
-              </div>
-            ))}
-        </div>
-      )}
-
-      <div className="filters">
-        {STATUSES.map((s) => (
-          <button
-            key={s}
-            className={`chip ${status === s && !flagged ? "on" : ""}`}
-            onClick={() => {
-              setStatus(s);
-              setFlagged(false);
-            }}
-          >
-            {s === "all" ? t("filterAll") : t(statusKey(s, true))}
-            {page?.counts?.[s] !== undefined && <span className="n">{page.counts[s]}</span>}
-            {s === "all" && page && <span className="n">{page.total}</span>}
-          </button>
-        ))}
-        <button
-          className={`chip ${flagged ? "on flag" : ""}`}
-          onClick={() => {
-            setFlagged((v) => !v);
-            setStatus("all");
-          }}
-        >
-          {t("filterFlagged")}
-          {page && <span className="n">{page.flagged}</span>}
-        </button>
-        <input
-          type="text"
-          className="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("searchPlaceholder")}
-        />
-        <select
-          className="search"
-          value={examId}
-          onChange={(e) => setExamId(e.target.value)}
-          aria-label={t("examsTitle")}
-        >
-          <option value="">{t("examsTitle")}: —</option>
-          {exams.map((exam) => (
-            <option key={exam.id} value={exam.id}>
-              {exam.title}
-            </option>
-          ))}
-        </select>
-        <select
-          className="search"
-          value={batchId}
-          onChange={(e) => setBatchId(e.target.value)}
-          aria-label={t("batchesTitle")}
-        >
-          <option value="">{t("batchesTitle")}: —</option>
-          {batches.map((batch) => (
-            <option key={batch.id} value={batch.id}>
-              {batch.name}
-            </option>
-          ))}
-        </select>
+          {rows.length === 0 ? (
+            <EmptyState
+              icon={<ClipboardCheckIcon className="size-5" />}
+              title={t("noScriptsYet")}
+              description={t("noScriptsYetLede")}
+              action={
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button asChild>
+                    <Link href="/exams/new">{t("createExam")}</Link>
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link href="/submit">{t("navNew")}</Link>
+                  </Button>
+                </div>
+              }
+            />
+          ) : (
+            <ul className="grid gap-3">
+              {rows.map((row) => (
+                <li key={row.id}>
+                  <ReviewQueueCard row={row} href={`/s/${row.id}`} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
 
-      {picked.size > 0 && (
-        <div className="bulk-bar">
-          <span>{t("selected", { n: picked.size })}</span>
-          <div className="spacer" />
-          <button className="ghost small" onClick={() => setPicked(new Set())}>
-            {t("clearSelection")}
-          </button>
-          <button className="small" disabled={busy} onClick={() => void releaseSelected()}>
-            {busy ? <span className="spin" /> : t("releaseSelected")}
-          </button>
-        </div>
-      )}
-
-      {!page ? (
-        <div className="center">
-          <span className="spin" />
-        </div>
-      ) : rows.length === 0 ? (
-        <p className="muted">{t("noResults")}</p>
-      ) : (
-        <div className="list">
-          {rows.map((row) => {
-            const canRelease = releasable.some((r) => r.id === row.id);
-            return (
-              <div key={row.id} className="item panel-row">
-                <input
-                  type="checkbox"
-                  checked={picked.has(row.id)}
-                  disabled={!canRelease}
-                  onChange={() => toggle(row.id)}
-                  title={canRelease ? "" : t("statusAwaitingTeacher")}
-                  aria-label={row.student?.email ?? row.id}
-                />
-                <Link href={`/s/${row.id}`} className="q">
-                  <span className="q-title">
-                    {row.student?.full_name || row.student?.email || "—"}
-                  </span>
-                  <span className="q-meta">
-                    {row.subject || row.question_text.trim().split("\n")[0]?.slice(0, 46) ||
-                      t("untitled")}
-                    {row.pages > 1 && ` · ${t("pagesLabel", { n: row.pages })}`}
-                    {row.created_at && ` · ${formatDate(row.created_at)}`}
-                  </span>
-                </Link>
-                {row.marks_stale && <span className="pill bad">{t("regrade")}</span>}
-                {row.needs_human_review && <span className="pill flag">{t("filterFlagged")}</span>}
-                <span
-                  className={`pill ${
-                    row.status === "released" ? "done" : row.status === "failed" ? "bad" : ""
-                  }`}
-                >
-                  {t(statusKey(row.status, true))}
-                </span>
-                <span className="score-chip">
-                  {row.total_awarded === null ? (
-                    <span className="muted">—</span>
-                  ) : (
-                    <>
-                      <strong>{row.total_awarded}</strong>
-                      <span className="muted">/{row.total_max}</span>
-                    </>
-                  )}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {page && rows.length > 0 && (
-        <div className="row" style={{ marginTop: 16, alignItems: "center" }}>
-          <span className="muted">
-            {t("showingN", { shown: rows.length, total: page.matched || page.total })}
-          </span>
-          <div className="spacer" />
-          {rows.length < (page.matched || page.total) && (
-            <button className="ghost small" disabled={loadingMore} onClick={() => void loadMore()}>
-              {loadingMore ? <span className="spin" /> : t("loadMore")}
-            </button>
+      <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+        <div
+          className={cn(
+            "rounded-2xl border p-5",
+            ready
+              ? "border-teal/30 bg-[color-mix(in_oklch,var(--teal),white_93%)]"
+              : "border-border/80 bg-card"
           )}
+        >
+          <div className="mb-4 flex items-start justify-between gap-2">
+            <div>
+              <p className="font-heading text-base font-semibold">
+                {ready ? t("demoReady") : t("setupChecklist")}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {ready
+                  ? t("aiFromServer")
+                  : t("stepsComplete", { n: setupDone })}
+              </p>
+            </div>
+            {ready ? (
+              <CheckCircle2Icon className="size-5 text-teal" />
+            ) : (
+              <CircleAlertIcon className="size-5 text-[color-mix(in_oklch,var(--status-review),black_10%)]" />
+            )}
+          </div>
+
+          {!ready ? (
+            <Progress value={(setupDone / 2) * 100} className="mb-4 h-1.5" />
+          ) : null}
+
+          <ul className="space-y-3">
+            <ChecklistRow
+              done={botOk}
+              icon={<BotIcon className="size-3.5" />}
+              title={t("telegramBot")}
+              detail={
+                botOk
+                  ? settings?.bot_username
+                    ? `@${settings.bot_username}`
+                    : t("botConnected")
+                  : t("connectWebhookHint")
+              }
+            />
+            <ChecklistRow
+              done={aiOk}
+              icon={<SparklesIcon className="size-3.5" />}
+              title="AI"
+              detail={t("aiFromServer")}
+            />
+          </ul>
+
+          {!ready ? (
+            <Button asChild className="mt-5 w-full">
+              <Link href="/settings">{t("continueSetup")}</Link>
+            </Button>
+          ) : null}
         </div>
-      )}
-    </>
+
+        <div className="rounded-2xl border border-border/70 bg-card p-5">
+          <p className="font-heading mb-3 text-sm font-semibold">
+            {t("quickActions")}
+          </p>
+          <div className="grid gap-2">
+            <Button asChild variant="outline" className="justify-start">
+              <Link href="/exams/new">
+                <BookOpenIcon />
+                {t("createExam")}
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="justify-start">
+              <Link href="/batches">
+                <UsersIcon />
+                {t("manageBatches")}
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="justify-start">
+              <Link href="/review">
+                <ClipboardCheckIcon />
+                {t("allReviews")}
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function ChecklistRow({
+  done,
+  icon,
+  title,
+  detail,
+}: {
+  done: boolean;
+  icon: ReactNode;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <li className="flex items-start gap-3">
+      <span
+        className={cn(
+          "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
+          done
+            ? "bg-teal text-teal-foreground"
+            : "bg-muted text-muted-foreground"
+        )}
+      >
+        {done ? <CheckCircle2Icon className="size-3.5" /> : icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="text-xs text-muted-foreground">{detail}</p>
+      </div>
+    </li>
   );
 }

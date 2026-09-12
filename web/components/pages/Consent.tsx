@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/api";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { usePrefs } from "@/lib/i18n";
 
 /**
@@ -27,11 +36,15 @@ export default function ConsentPage() {
   const [details, setDetails] = useState<Details | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
+  const [authorizationId, setAuthorizationId] = useState<string | null | undefined>(undefined);
 
-  const authorizationId = new URLSearchParams(window.location.search).get("authorization_id");
+  useEffect(() => {
+    setAuthorizationId(new URLSearchParams(window.location.search).get("authorization_id"));
+  }, []);
 
   useEffect(() => {
     if (!authorizationId) {
+      if (authorizationId === undefined) return;
       setError(t("consentNoRequest"));
       return;
     }
@@ -81,18 +94,22 @@ export default function ConsentPage() {
 
   if (error && !details) {
     return (
-      <>
-        <h1>{t("consentTitle")}</h1>
-        <div className="banner err">{error}</div>
-      </>
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
     );
   }
 
   if (!details) {
     return (
-      <div className="center">
-        <span className="spin" />
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("consentTitle")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">{t("working")}</p>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -100,47 +117,55 @@ export default function ConsentPage() {
   const scopes = details.scope.split(/\s+/).filter(Boolean);
 
   return (
-    <>
-      <h1>{t("consentTitle")}</h1>
-      <p className="lede">{t("consentLede", { client })}</p>
+    <Card className="shadow-none ring-0">
+      <CardHeader>
+        <CardTitle>{t("consentTitle")}</CardTitle>
+        <CardDescription>{t("consentLede", { client })}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      {error && <div className="banner err">{error}</div>}
-
-      <div className="card">
-        <div className="stat-row">
-          <div className="stat">
-            <span className="k">{t("consentClient")}</span>
-            <span className="v" style={{ fontSize: 17 }}>{client}</span>
+        <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t("consentClient")}</p>
+            <p className="font-medium">{client}</p>
           </div>
-          <div className="stat">
-            <span className="k">{t("consentAccount")}</span>
-            <span className="v" style={{ fontSize: 17 }}>{details.user.email}</span>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t("consentAccount")}</p>
+            <p className="font-medium">{details.user.email}</p>
           </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">{t("consentGrants")}</p>
+            <p className="text-sm">{t("consentGrantSubmit")}</p>
+            <p className="text-sm">{t("consentGrantRead")}</p>
+          </div>
+          {scopes.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("consentScopes")}: <code>{scopes.join(" ")}</code>
+            </p>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            {t("consentRedirect")}: <code>{details.redirect_uri}</code>
+          </p>
         </div>
 
-        <h3 style={{ marginTop: 18 }}>{t("consentGrants")}</h3>
-        <ul className="plain">
-          <li>{t("consentGrantSubmit")}</li>
-          <li>{t("consentGrantRead")}</li>
-        </ul>
-        {scopes.length > 0 && (
-          <p className="muted" style={{ fontSize: 12.5 }}>
-            {t("consentScopes")}: <code>{scopes.join(" ")}</code>
-          </p>
-        )}
-        <p className="muted" style={{ fontSize: 12.5 }}>
-          {t("consentRedirect")}: <code>{details.redirect_uri}</code>
-        </p>
-      </div>
-
-      <div className="row" style={{ marginTop: 16, gap: 10 }}>
-        <button disabled={busy !== null} onClick={() => void decide(true)}>
-          {busy === "approve" ? <span className="spin" /> : t("consentApprove")}
-        </button>
-        <button className="ghost" disabled={busy !== null} onClick={() => void decide(false)}>
-          {busy === "deny" ? <span className="spin" /> : t("consentDeny")}
-        </button>
-      </div>
-    </>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={busy !== null} onClick={() => void decide(true)}>
+            {busy === "approve" ? t("working") : t("consentApprove")}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => void decide(false)}
+          >
+            {busy === "deny" ? t("working") : t("consentDeny")}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -2,8 +2,26 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { ApiError, apiPost, API_BASE, supabase } from "@/lib/api";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { usePrefs } from "@/lib/i18n";
 
 type RubricPart = {
@@ -119,186 +137,203 @@ export default function ExamNewPage() {
   }
 
   return (
-    <div className="stack">
-      <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-        <Link href="/exams" className="muted">
-          {t("examsTitle")}
-        </Link>
-        <span className="muted">/</span>
-        <span className="muted">{t("createExam")}</span>
-      </div>
+    <div className="space-y-4">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
-      <div>
-        <h1>{t("createExam")}</h1>
-        <p className="lede">{t("createExamLede")}</p>
-      </div>
-
-      {error && <p className="error">{error}</p>}
-
-      <section className="card">
-        <h2 style={{ marginTop: 0 }}>{t("examDetails")}</h2>
-        <div className="exam-details-grid">
-          <label className="field">
-            {t("examTitle")}
-            <input
-              type="text"
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("examDetails")}</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="exam-title">{t("examTitle")}</Label>
+            <Input
+              id="exam-title"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(event) => setTitle(event.target.value)}
               placeholder={t("examTitlePlaceholder")}
               required
             />
-          </label>
-          <label className="field">
-            {t("publishModeExam")}
-            <select
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="publish-mode">{t("publishModeExam")}</Label>
+            <Select
               value={publishMode}
-              onChange={(e) =>
-                setPublishMode(e.target.value as "admin" | "auto" | "inherit")
+              onValueChange={(value) =>
+                setPublishMode(value as "admin" | "auto" | "inherit")
               }
             >
-              <option value="inherit">{t("publishInherit")}</option>
-              <option value="admin">{t("publishAdmin")}</option>
-              <option value="auto">{t("publishAuto")}</option>
-            </select>
-          </label>
-        </div>
-      </section>
+              <SelectTrigger id="publish-mode" className="w-full rounded-lg bg-card">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">{t("publishInherit")}</SelectItem>
+                <SelectItem value="admin">{t("publishAdmin")}</SelectItem>
+                <SelectItem value="auto">{t("publishAuto")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <button
+      <div className="flex flex-wrap gap-2">
+        <Button
           type="button"
-          className={mode === "manual" ? "primary small" : "ghost small"}
+          size="sm"
+          variant={mode === "manual" ? "default" : "outline"}
           onClick={() => setMode("manual")}
         >
           {t("manualCq")}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={mode === "generate" ? "primary small" : "ghost small"}
+          size="sm"
+          variant={mode === "generate" ? "default" : "outline"}
           onClick={() => setMode("generate")}
         >
           {t("generateFromSource")}
-        </button>
+        </Button>
       </div>
 
       {mode === "manual" ? (
-        <section className="card stack">
-          <div>
-            <h2 style={{ marginTop: 0 }}>{t("rubricTitle")}</h2>
-            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-bangla">{t("rubricTitle")}</CardTitle>
+            <CardDescription>
               {t("rubricHint", {
                 sum: rubricSum,
                 total: marksTotal,
                 status: rubricOk ? t("rubricOk") : t("rubricMismatch"),
               })}
-            </p>
-          </div>
-
-          <label className="field">
-            {t("overallStem")}
-            <textarea
-              className="bangla"
-              rows={3}
-              value={promptText}
-              onChange={(e) => setPromptText(e.target.value)}
-            />
-          </label>
-
-          <label className="field" style={{ maxWidth: 220 }}>
-            {t("totalMarks")}
-            <input
-              type="number"
-              min={1}
-              value={totalMarks}
-              onChange={(e) => setTotalMarks(e.target.value)}
-            />
-          </label>
-
-          {rubric.map((part, index) => (
-            <div key={part.key} className="rubric-part">
-              <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <strong className="bangla">
-                  {part.label} — {part.title}
-                </strong>
-                <input
-                  className="rubric-marks"
-                  type="number"
-                  min={0}
-                  value={part.maxMarks}
-                  onChange={(e) =>
-                    updatePart(index, { maxMarks: Number(e.target.value) || 0 })
-                  }
-                />
-                <span className="muted" style={{ fontSize: 13 }}>
-                  {t("marksUnit")}
-                </span>
-              </div>
-              <label className="field" style={{ marginBottom: 10 }}>
-                {t("partPrompt")}
-                <textarea
-                  className="bangla"
-                  rows={2}
-                  value={part.prompt}
-                  onChange={(e) => updatePart(index, { prompt: e.target.value })}
-                />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                {t("modelAnswer")}
-                <textarea
-                  className="bangla"
-                  rows={2}
-                  value={part.modelAnswer}
-                  onChange={(e) => updatePart(index, { modelAnswer: e.target.value })}
-                />
-              </label>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="prompt-text">{t("overallStem")}</Label>
+              <Textarea
+                id="prompt-text"
+                className="min-h-24 rounded-lg bg-card text-sm text-bangla"
+                rows={4}
+                value={promptText}
+                onChange={(event) => setPromptText(event.target.value)}
+              />
             </div>
-          ))}
 
-          <button
-            type="button"
-            className="primary"
-            disabled={!title.trim() || busy || !rubricOk}
-            onClick={() => void handleCreate("manual")}
-          >
-            {busy ? t("working") : t("saveContinue")}
-          </button>
-        </section>
+            <div className="max-w-44 space-y-2">
+              <Label htmlFor="total-marks">{t("totalMarks")}</Label>
+              <Input
+                id="total-marks"
+                type="number"
+                min={1}
+                value={totalMarks}
+                onChange={(event) => setTotalMarks(event.target.value)}
+              />
+            </div>
+
+            {rubric.map((part, index) => (
+              <div
+                key={part.key}
+                className="space-y-3 rounded-xl border border-border/70 bg-muted/25 p-4"
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="font-medium text-bangla">
+                    {part.label} - {part.title}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      className="w-20"
+                      type="number"
+                      min={0}
+                      value={part.maxMarks}
+                      onChange={(event) =>
+                        updatePart(index, {
+                          maxMarks: Number(event.target.value) || 0,
+                        })
+                      }
+                    />
+                    <span className="text-xs text-muted-foreground">{t("marksUnit")}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`${part.key}-prompt`}>{t("partPrompt")}</Label>
+                  <Textarea
+                    id={`${part.key}-prompt`}
+                    className="min-h-20 rounded-lg bg-card text-sm text-bangla"
+                    rows={3}
+                    value={part.prompt}
+                    onChange={(event) =>
+                      updatePart(index, { prompt: event.target.value })
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`${part.key}-answer`}>{t("modelAnswer")}</Label>
+                  <Textarea
+                    id={`${part.key}-answer`}
+                    className="min-h-20 rounded-lg bg-card text-sm text-bangla"
+                    rows={3}
+                    value={part.modelAnswer}
+                    onChange={(event) =>
+                      updatePart(index, { modelAnswer: event.target.value })
+                    }
+                  />
+                </div>
+              </div>
+            ))}
+
+            <Button
+              type="button"
+              disabled={!title.trim() || busy || !rubricOk}
+              onClick={() => void handleCreate("manual")}
+            >
+              {busy ? t("working") : t("saveContinue")}
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
-        <section className="card stack">
-          <div>
-            <h2 style={{ marginTop: 0 }}>{t("generateCardTitle")}</h2>
-            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>
-              {t("generateCardLede")}
-            </p>
-          </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("generateCardTitle")}</CardTitle>
+            <CardDescription>{t("generateCardLede")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="source-text">{t("sourceTextOptional")}</Label>
+              <Textarea
+                id="source-text"
+                className="min-h-24 rounded-lg bg-card text-sm"
+                rows={4}
+                value={sourceText}
+                onChange={(event) => setSourceText(event.target.value)}
+              />
+            </div>
 
-          <label className="field">
-            {t("sourceTextOptional")}
-            <textarea
-              rows={3}
-              value={sourceText}
-              onChange={(e) => setSourceText(e.target.value)}
-            />
-          </label>
+            <div className="space-y-2">
+              <Label htmlFor="source-file">{t("uploadSource")}</Label>
+              <Input
+                id="source-file"
+                type="file"
+                accept=".pdf,image/*,.txt"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              />
+            </div>
 
-          <label className="field">
-            {t("uploadSource")}
-            <input
-              type="file"
-              accept=".pdf,image/*,.txt"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-
-          <button
-            type="button"
-            className="primary"
-            disabled={!title.trim() || busy}
-            onClick={() => void handleCreate("generate")}
-          >
-            {busy ? t("working") : t("generateContinue")}
-          </button>
-        </section>
+            <Button
+              type="button"
+              disabled={!title.trim() || busy}
+              onClick={() => void handleCreate("generate")}
+            >
+              {busy ? t("working") : t("generateContinue")}
+            </Button>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

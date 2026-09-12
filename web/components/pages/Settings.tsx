@@ -2,6 +2,25 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { usePrefs } from "@/lib/i18n";
 
 type OrgSettings = {
@@ -16,7 +35,7 @@ type OrgSettings = {
 
 export default function SettingsPage() {
   const { t } = usePrefs();
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [settings, setSettings] = useState<OrgSettings | null>(null);
   const [token, setToken] = useState("");
   const [threshold, setThreshold] = useState("0.65");
@@ -32,6 +51,8 @@ export default function SettingsPage() {
         setSettings(data);
         setThreshold(String(data.ocr_confidence_threshold ?? 0.65));
         setPublishMode(data.publish_mode || "admin");
+        if (data.bot_connected) setStep(2);
+        if (data.bot_connected && data.ai_from_env) setStep(3);
       } catch (err) {
         setError(err instanceof Error && err.message ? err.message : t("loadFailed"));
       }
@@ -53,6 +74,7 @@ export default function SettingsPage() {
       setToken("");
       const data = await apiGet<OrgSettings>("/api/teacher/settings");
       setSettings(data);
+      setStep(data.ai_from_env ? 3 : 2);
     } catch (err) {
       // Network/CORS failures are plain Errors ("Failed to fetch"), not ApiError.
       setError(err instanceof Error && err.message ? err.message : t("saveFailed"));
@@ -81,89 +103,182 @@ export default function SettingsPage() {
     }
   }
 
+  const steps = [
+    { id: 1 as const, label: t("stepTelegram") },
+    { id: 2 as const, label: t("stepAi") },
+    { id: 3 as const, label: t("stepGrading") },
+  ];
+
   return (
-    <div className="stack">
-      <div>
-        <h1>{t("settingsTitle")}</h1>
-        <p className="lede">{t("settingsLede")}</p>
-      </div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {steps.map((item) => {
+          const isActive = step === item.id;
+          const isDone =
+            item.id === 1
+              ? Boolean(settings?.bot_connected)
+              : item.id === 2
+                ? Boolean(settings?.ai_from_env)
+                : false;
 
-      <div className="row" style={{ gap: 8 }}>
-        <button
-          type="button"
-          className={step === 1 ? "primary small" : "ghost small"}
-          onClick={() => setStep(1)}
-        >
-          1. {t("stepTelegram")}
-        </button>
-        <button
-          type="button"
-          className={step === 2 ? "primary small" : "ghost small"}
-          onClick={() => setStep(2)}
-        >
-          2. {t("stepGrading")}
-        </button>
-      </div>
-
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="muted">{notice}</p>}
-
-      {step === 1 && (
-        <form className="card stack" onSubmit={connect}>
-          <div className="row">
-            <span className={`pill ${settings?.bot_connected ? "done" : ""}`}>
-              {settings?.bot_connected ? t("botConnected") : t("botNotConnected")}
-            </span>
-            {settings?.bot_username && (
-              <span className="muted">@{settings.bot_username}</span>
-            )}
-          </div>
-          <label>
-            {t("botToken")}
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={settings?.telegram_bot_token_masked || "123456:ABC…"}
-              autoComplete="off"
-            />
-          </label>
-          <p className="muted" style={{ fontSize: 13 }}>{t("botTokenHint")}</p>
-          <p className="muted" style={{ fontSize: 13 }}>{t("aiFromEnv")}</p>
-          <button className="primary" disabled={busy} type="submit">
-            {t("connectWebhook")}
-          </button>
-        </form>
-      )}
-
-      {step === 2 && (
-        <form className="card stack" onSubmit={saveGrading}>
-          <label>
-            {t("ocrThreshold")}
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.01}
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-            />
-          </label>
-          <label>
-            {t("publishMode")}
-            <select
-              value={publishMode}
-              onChange={(e) => setPublishMode(e.target.value as "auto" | "admin")}
+          return (
+            <Button
+              key={item.id}
+              type="button"
+              size="sm"
+              variant={isActive ? "default" : "outline"}
+              className="rounded-full"
+              onClick={() => setStep(item.id)}
             >
-              <option value="admin">{t("publishAdmin")}</option>
-              <option value="auto">{t("publishAuto")}</option>
-            </select>
-          </label>
-          <button className="primary" disabled={busy} type="submit">
-            {t("saveSettings")}
-          </button>
-        </form>
-      )}
+              {item.id}. {item.label}
+              {isDone ? ` · ${t("saved")}` : ""}
+            </Button>
+          );
+        })}
+      </div>
+
+      {error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {notice ? (
+        <Alert>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {step === 1 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settingsTelegramTitle")}</CardTitle>
+            <CardDescription>{t("settingsTelegramLede")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={settings?.bot_connected ? "default" : "secondary"}>
+                {settings?.bot_connected ? t("botConnected") : t("botNotConnected")}
+              </Badge>
+              {settings?.bot_username ? (
+                <Badge variant="outline">@{settings.bot_username}</Badge>
+              ) : null}
+            </div>
+
+            <form className="space-y-4" onSubmit={connect}>
+              <div className="space-y-2">
+                <Label htmlFor="telegram-token">{t("botToken")}</Label>
+                <Input
+                  id="telegram-token"
+                  type="password"
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                  placeholder={settings?.telegram_bot_token_masked || "123456:ABC..."}
+                  autoComplete="off"
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground">{t("botTokenHint")}</p>
+              <p className="text-xs text-muted-foreground">{t("settingsConnectHint")}</p>
+
+              <div className="flex flex-wrap gap-2">
+                <Button disabled={busy} type="submit">
+                  {t("connectWebhook")}
+                </Button>
+                {settings?.bot_connected ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep(2)}
+                  >
+                    {t("actionContinue")}
+                  </Button>
+                ) : null}
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {step === 2 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settingsAiTitle")}</CardTitle>
+            <CardDescription>{t("settingsAiLede")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={settings?.ai_from_env ? "default" : "secondary"}>
+                {settings?.ai_from_env ? t("settingsEnvReady") : t("settingsEnvMissing")}
+              </Badge>
+            </div>
+
+            <Alert>
+              <AlertDescription>{t("aiFromEnv")}</AlertDescription>
+            </Alert>
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={() => setStep(1)}>
+                {t("back")}
+              </Button>
+              <Button type="button" onClick={() => setStep(3)}>
+                {t("actionContinue")}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {step === 3 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("settingsGradingTitle")}</CardTitle>
+            <CardDescription>{t("settingsGradingLede")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" onSubmit={saveGrading}>
+              <div className="space-y-2">
+                <Label htmlFor="ocr-threshold">{t("ocrThreshold")}</Label>
+                <Input
+                  id="ocr-threshold"
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={threshold}
+                  onChange={(event) => setThreshold(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">{t("settingsThresholdHint")}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="publish-mode">{t("publishMode")}</Label>
+                <Select
+                  value={publishMode}
+                  onValueChange={(value) => setPublishMode(value as "auto" | "admin")}
+                >
+                  <SelectTrigger id="publish-mode" className="w-full rounded-lg bg-card">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">{t("publishAdmin")}</SelectItem>
+                    <SelectItem value="auto">{t("publishAuto")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => setStep(2)}>
+                  {t("back")}
+                </Button>
+                <Button disabled={busy} type="submit">
+                  {t("saveSettings")}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

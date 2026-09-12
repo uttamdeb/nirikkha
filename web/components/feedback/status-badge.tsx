@@ -14,6 +14,8 @@ const STATUS_STYLES: Record<string, string> = {
     "border-transparent bg-[color-mix(in_oklch,var(--status-failed),white_78%)] text-[color-mix(in_oklch,var(--status-failed),black_25%)]",
   clarifying: "border-transparent bg-accent text-accent-foreground",
   draft: "border-transparent bg-muted text-muted-foreground",
+  closed:
+    "border-transparent bg-[color-mix(in_oklch,var(--foreground),white_88%)] text-muted-foreground",
   approved: "border-transparent bg-secondary text-secondary-foreground",
   // Submission pipeline
   ocr_running: "border-transparent bg-secondary text-secondary-foreground",
@@ -35,6 +37,7 @@ const LABELS: Record<string, string> = {
   failed: "Failed",
   clarifying: "Clarifying",
   draft: "Draft",
+  closed: "Closed",
   approved: "Approved",
 };
 
