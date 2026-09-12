@@ -40,6 +40,9 @@ log = logging.getLogger("nirikkha.mcp")
 router = APIRouter()
 
 PROTOCOL_VERSION = "2025-06-18"
+# Older clients reject a response that does not name a version they know. The
+# tool surface is identical across these, so echo back whichever was asked for.
+SUPPORTED_PROTOCOLS = frozenset({"2025-06-18", "2025-03-26", "2024-11-05"})
 # Supabase Auth is the authorization server for this endpoint: it issues the
 # tokens, and the app hosts the consent screen it redirects to.
 AUTHORIZATION_SERVER = f"{settings.supabase_url}/auth/v1"
@@ -47,6 +50,11 @@ SERVER_NAME = "nirikkha"
 SERVER_VERSION = "0.1.0"
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_PAGES = 3
+# Cloud Run caps an HTTP/1 body at 32 MiB and base64 inflates by a third, so
+# three pages at the per-page limit would be refused by the platform before this
+# code ran — the client would see a connection failure with nothing to act on.
+# Refuse it here instead, where the message can name the limit.
+MAX_TOTAL_IMAGE_BYTES = 23 * 1024 * 1024
 
 INSTRUCTIONS = (
     "Nirikkha marks handwritten Bangladeshi SSC/HSC সৃজনশীল প্রশ্ন (creative question) "
@@ -423,6 +431,14 @@ async def _tool_check_cq_script(args: dict[str, Any], caller: Caller) -> dict[st
             raise AgentError(f"page {position + 1} is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
         images.append(image)
 
+    total = sum(len(image) for image in images)
+    if total > MAX_TOTAL_IMAGE_BYTES:
+        raise AgentError(
+            f"{len(images)} pages come to {total // (1024 * 1024)} MB; the limit for one "
+            f"script is {MAX_TOTAL_IMAGE_BYTES // (1024 * 1024)} MB. Photograph them at a "
+            "lower resolution, or send fewer pages."
+        )
+
     submission_id = str(uuid.uuid4())
     paths = [
         f"{user_id}/{submission_id}{'' if i == 0 else f'-{i + 1}'}{extension}"
@@ -708,8 +724,11 @@ async def mcp_endpoint(
         return JSONResponse({}, status_code=202)
 
     if method == "initialize":
+        asked = ((body.get("params") or {}) if isinstance(body.get("params"), dict) else {}).get(
+            "protocolVersion"
+        )
         return JSONResponse(_rpc_ok(request_id, {
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": asked if asked in SUPPORTED_PROTOCOLS else PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": SERVER_NAME, "title": "Nirikkha CQ marker",
                            "version": SERVER_VERSION},
@@ -721,6 +740,13 @@ async def mcp_endpoint(
 
     if method == "tools/list":
         return JSONResponse(_rpc_ok(request_id, {"tools": TOOLS}))
+
+    # Clients probe these at startup even when the capability is not advertised.
+    # An empty list is a true answer and quieter than an error.
+    if method in {"resources/list", "resources/templates/list"}:
+        return JSONResponse(_rpc_ok(request_id, {"resources": [], "resourceTemplates": []}))
+    if method == "prompts/list":
+        return JSONResponse(_rpc_ok(request_id, {"prompts": []}))
 
     if method != "tools/call":
         return JSONResponse(_rpc_error(request_id, -32601, f"Method not found: {method}"))

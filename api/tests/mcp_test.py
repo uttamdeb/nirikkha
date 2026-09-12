@@ -203,6 +203,46 @@ def main() -> int:
                        {"submission_id": "00000000-0000-0000-0000-000000000000"}
                        ).get("_isError") is True)
 
+    print("\n\033[1mprotocol edges\033[0m")
+    for version in ("2024-11-05", "2025-03-26", "2025-06-18"):
+        got = anon.rpc("initialize", {"protocolVersion": version}).json()["result"]
+        check(f"initialize echoes {version}", got["protocolVersion"] == version,
+              got["protocolVersion"])
+    unknown = anon.rpc("initialize", {"protocolVersion": "1999-01-01"}).json()["result"]
+    check("an unknown version falls back to ours",
+          unknown["protocolVersion"] == "2025-06-18", unknown["protocolVersion"])
+    check("resources/list is empty, not an error",
+          anon.rpc("resources/list").json()["result"]["resources"] == [])
+    check("prompts/list is empty, not an error",
+          anon.rpc("prompts/list").json()["result"]["prompts"] == [])
+    check("GET is refused", httpx.get(f"{API}/mcp").status_code == 405)
+    check("a batch is refused", httpx.post(
+        f"{API}/mcp", json=[{"jsonrpc": "2.0", "id": 1, "method": "ping"}]).status_code == 400)
+    check("a 401 says where to get a token",
+          "resource_metadata" in (anon.rpc(
+              "tools/call", {"name": "get_cq_rubric", "arguments": {}}
+          ).headers.get("www-authenticate") or ""))
+
+    print("\n\033[1mupload limits\033[0m")
+    one = base64.b64encode(png()).decode()
+    check("four pages are refused", student.call("check_cq_script", {
+        "pages_base64": [one] * 4, "mime_type": "image/png"}).get("_isError") is True)
+    check("nothing at all is refused",
+          student.call("check_cq_script", {"mime_type": "image/png"}).get("_isError") is True)
+    check("a bad mime type is refused", student.call("check_cq_script", {
+        "script_base64": one, "mime_type": "image/gif"}).get("_isError") is True)
+    check("mangled base64 is refused", student.call("check_cq_script", {
+        "script_base64": "not base64!!", "mime_type": "image/png"}).get("_isError") is True)
+    check("an empty page is refused", student.call("check_cq_script", {
+        "script_base64": "", "pages_base64": [""], "mime_type": "image/png"
+    }).get("_isError") is True)
+    # 3 x 8 MB of incompressible noise clears the per-page limit and breaks the total.
+    big = base64.b64encode(os.urandom(8 * 1024 * 1024)).decode()
+    fat = student.call("check_cq_script", {"pages_base64": [big] * 3, "mime_type": "image/png"})
+    check("too many megabytes in total is refused with a limit named",
+          fat.get("_isError") is True and "23 MB" in str(fat.get("error")),
+          str(fat.get("error"))[:90])
+
     print("\n\033[1mlisting\033[0m")
     own = student.call("list_cq_submissions", {"limit": 5})
     check("a student can list their own", own.get("_isError") is False, str(own.get("error"))[:80])
