@@ -110,12 +110,18 @@ async def get_settings(_caller: Caller = Depends(require_teacher)) -> dict[str, 
 async def patch_settings(
     body: SettingsPatch, _caller: Caller = Depends(require_teacher)
 ) -> dict[str, Any]:
-    await settings_store.update_org_settings(
-        telegram_bot_token=body.telegram_bot_token,
-        ocr_confidence_threshold=body.ocr_confidence_threshold,
-        publish_mode=body.publish_mode,
-    )
-    return await settings_store.get_public_settings()
+    try:
+        await settings_store.update_org_settings(
+            telegram_bot_token=body.telegram_bot_token,
+            ocr_confidence_threshold=body.ocr_confidence_threshold,
+            publish_mode=body.publish_mode,
+        )
+        return await settings_store.get_public_settings()
+    except RuntimeError as exc:
+        # Missing SETTINGS_ENCRYPTION_KEY (or similar) — surface to the UI.
+        raise HTTPException(400, str(exc)) from exc
+    except db.DbError as exc:
+        raise HTTPException(502, f"Could not save settings: {exc}") from exc
 
 
 @router.post("/telegram/connect")
@@ -125,6 +131,8 @@ async def telegram_connect(
     try:
         return await connect_webhook(body.token)
     except AgentError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(400, f"Connect failed: {exc}") from exc

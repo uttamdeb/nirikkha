@@ -5,6 +5,31 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    """Pull repo-root `.env` into the process if vars are not already set.
+
+    Uvicorn does not load `.env` by itself; without this, local runs miss
+    SETTINGS_ENCRYPTION_KEY and Telegram token save dies with a 500.
+    """
+    # api/app/config.py → parents[2] is the repo root (next to .env / api / web).
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.is_file():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        os.environ.setdefault(key, value.strip().strip("'").strip('"'))
+
+
+_load_dotenv()
 
 
 def _env(key: str, default: str = "") -> str:

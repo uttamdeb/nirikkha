@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { usePrefs } from "../lib/i18n";
 
 type OrgSettings = {
@@ -31,7 +31,7 @@ export default function SettingsPage() {
         setThreshold(String(data.ocr_confidence_threshold ?? 0.65));
         setPublishMode(data.publish_mode || "admin");
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : t("loadFailed"));
+        setError(err instanceof Error && err.message ? err.message : t("loadFailed"));
       }
     })();
   }, [t]);
@@ -42,9 +42,7 @@ export default function SettingsPage() {
     setError("");
     setNotice("");
     try {
-      if (token.trim()) {
-        await apiPatch("/api/teacher/settings", { telegram_bot_token: token.trim() });
-      }
+      // connect_webhook persists the token and calls Telegram setWebhook.
       const result = await apiPost<{ username: string; bot_connected: boolean }>(
         "/api/teacher/telegram/connect",
         token.trim() ? { token: token.trim() } : {},
@@ -54,7 +52,8 @@ export default function SettingsPage() {
       const data = await apiGet<OrgSettings>("/api/teacher/settings");
       setSettings(data);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("saveFailed"));
+      // Network/CORS failures are plain Errors ("Failed to fetch"), not ApiError.
+      setError(err instanceof Error && err.message ? err.message : t("saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -73,7 +72,8 @@ export default function SettingsPage() {
       setSettings(data);
       setNotice(t("saved"));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("saveFailed"));
+      // Network/CORS failures are plain Errors ("Failed to fetch"), not ApiError.
+      setError(err instanceof Error && err.message ? err.message : t("saveFailed"));
     } finally {
       setBusy(false);
     }
