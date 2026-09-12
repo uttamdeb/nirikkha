@@ -115,6 +115,24 @@ header.top .bar {
   color: var(--ink);
 }
 .brand span { color: var(--green); }
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  background: center / contain no-repeat url("/logo.png");
+}
+/* Declared for all three theme states, not just the stamped ones, or the
+   default "system" setting would keep the navy mark on a dark ground. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .brand-mark { background-image: url("/logo-dark.png"); }
+}
+:root[data-theme="dark"] .brand-mark { background-image: url("/logo-dark.png"); }
+:root[data-theme="light"] .brand-mark { background-image: url("/logo.png"); }
 .spacer { flex: 1 1 auto; }
 
 nav { display: flex; gap: 2px; }

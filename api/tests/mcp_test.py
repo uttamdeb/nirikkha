@@ -254,6 +254,10 @@ def main() -> int:
     check("a student cannot filter across people",
           student.call("list_cq_submissions", {"flagged": True}).get("_isError") is True)
 
+    one = other.call("list_cq_submissions", {"limit": 1})
+    check("a page smaller than the set says there is more",
+          one.get("count") == 1 and one.get("more") is True, str(one.get("more")))
+
     panel = other.call("list_cq_submissions", {"limit": 50})
     check("a teacher lists everyone", panel.get("viewing_as") == "teacher")
     check("rows name the student", all("student" in x for x in panel.get("submissions", [])))

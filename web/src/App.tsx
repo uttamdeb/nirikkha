@@ -31,6 +31,7 @@ function Shell({ session, role }: { session: Session; role: string }) {
       <header className="top">
         <div className="bar">
           <Link to="/" className="brand">
+            <span className="brand-mark" role="img" aria-label={t("brand")} />
             {t("brand")}<span>.</span>
           </Link>
           <nav>
