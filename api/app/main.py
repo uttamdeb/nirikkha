@@ -574,7 +574,10 @@ async def telegram_webhook(
 
     org = await settings_store.get_org_settings()
     expected = org.get("webhook_secret")
-    if expected and x_telegram_bot_api_secret_token != expected:
+    # Fail closed. This route is public and drives the bot, so a missing secret
+    # has to refuse rather than wave the request through — get_org_settings
+    # always seeds one, so the only way here is a row that lost it.
+    if not expected or x_telegram_bot_api_secret_token != expected:
         raise HTTPException(401, "Invalid secret")
     try:
         update = await request.json()
