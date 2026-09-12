@@ -48,7 +48,13 @@ def _mask_enc(enc: str | None) -> str | None:
 
 
 async def get_public_settings() -> dict[str, Any]:
+    from .config import settings as app_settings
+
     s = await get_org_settings()
+    # Surface which env-backed engines are active — keys stay on the server.
+    ocr = (app_settings.ocr_provider or "stub").lower()
+    grader = (app_settings.grader_provider or "stub").lower()
+    has_ai = ocr != "stub" or grader != "stub"
     return {
         "id": s["id"],
         "ocr_confidence_threshold": s.get("ocr_confidence_threshold", 0.65),
@@ -59,8 +65,14 @@ async def get_public_settings() -> dict[str, Any]:
         "telegram_bot_token_masked": _mask_enc(s.get("telegram_bot_token_enc")),
         "webhook_secret": s.get("webhook_secret"),
         "updated_at": s.get("updated_at"),
-        # Models stay in process env — surface that clearly to the UI.
         "ai_from_env": True,
+        "ai_enabled": has_ai,
+        "ocr_provider": ocr,
+        "ocr_model": app_settings.ocr_model,
+        "grader_provider": grader,
+        "grader_model": app_settings.grader_model,
+        "has_gemini_key": bool(app_settings.gemini_api_key),
+        "has_openai_key": bool(app_settings.openai_api_key),
     }
 
 
