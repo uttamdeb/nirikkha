@@ -287,6 +287,45 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False},
     },
     {
+        "name": "fix_cq_transcription",
+        "title": "Correct a line the reader got wrong",
+        "description": (
+            "Teachers only. Replace what the reader transcribed for one line, when it read the "
+            "handwriting wrongly rather than failing to read it at all.\n\n"
+            "Type what the student actually wrote, mistakes and all — the mistakes are what "
+            "gets marked. This does NOT re-mark the script: the existing marks were computed "
+            "from the old text and are now stale, so they cannot be released until "
+            "regrade_cq_script has run. Read the result to see the lines before changing one."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "submission_id": {"type": "string"},
+                "line_index": {"type": "integer", "minimum": 0},
+                "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+            },
+            "required": ["submission_id", "line_index", "text"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "regrade_cq_script",
+        "title": "Mark the script again",
+        "description": (
+            "Teachers only. Run the marker over the current transcript, discarding the previous "
+            "marks. Use it after correcting a line — a script whose text changed cannot be "
+            "released until it has been marked against the text it now has.\n\n"
+            "This also clears teacher rewrites of the marker's wording, because the agent is "
+            "then speaking about text it has not seen before. Takes 10-30 seconds."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"submission_id": {"type": "string"}},
+            "required": ["submission_id"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": False, "openWorldHint": True},
+    },
+    {
         "name": "release_cq_marks",
         "title": "Publish a result to the student",
         "description": (
@@ -607,6 +646,28 @@ async def _tool_edit_feedback(args: dict[str, Any], caller: Caller) -> dict[str,
     return await _result_payload(submission_id)
 
 
+async def _tool_fix_line(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    submission_id = str(args.get("submission_id") or "")
+    text = str(args.get("text") or "").strip()
+    if not text:
+        raise AgentError("give the text the line actually says")
+    line_index = args.get("line_index")
+    if not isinstance(line_index, int) or isinstance(line_index, bool) or line_index < 0:
+        raise AgentError("line_index must be a non-negative integer")
+    await pipeline.edit_line(submission_id, line_index, text)
+    return await _result_payload(submission_id)
+
+
+async def _tool_regrade(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    submission_id = str(args.get("submission_id") or "")
+    if not submission_id:
+        raise AgentError("submission_id is required")
+    await pipeline.regrade(submission_id)
+    return await _result_payload(submission_id)
+
+
 async def _tool_release(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
     _require_teacher(caller)
     submission_id = str(args.get("submission_id") or "")
@@ -631,6 +692,8 @@ HANDLERS: dict[str, Handler] = {
     "list_cq_submissions": _tool_list,
     "override_cq_mark": _tool_override,
     "edit_cq_feedback": _tool_edit_feedback,
+    "fix_cq_transcription": _tool_fix_line,
+    "regrade_cq_script": _tool_regrade,
     "release_cq_marks": _tool_release,
     "get_cq_rubric": _tool_rubric,
 }
@@ -639,6 +702,7 @@ HANDLERS: dict[str, Handler] = {
 OWNED: set[str] = {
     "clarify_unclear_line", "get_cq_result",
     "override_cq_mark", "edit_cq_feedback", "release_cq_marks",
+    "fix_cq_transcription", "regrade_cq_script",
 }
 
 

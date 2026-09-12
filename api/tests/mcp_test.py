@@ -105,6 +105,7 @@ def main() -> int:
     expected = {
         "check_cq_script", "clarify_unclear_line", "get_cq_result", "list_cq_submissions",
         "override_cq_mark", "edit_cq_feedback", "release_cq_marks", "get_cq_rubric",
+        "fix_cq_transcription", "regrade_cq_script",
     }
     check("the expected tools, and no others", set(tools) == expected,
           f"extra {set(tools) - expected or '-'}, missing {expected - set(tools) or '-'}")
@@ -305,6 +306,36 @@ def main() -> int:
     check("empty feedback is refused",
           other.call("edit_cq_feedback",
                      {"submission_id": sid, "feedback": "   "}).get("_isError") is True)
+
+    print("\n\033[1mcorrecting a misread line\033[0m")
+    lines_before = student.call("get_cq_result", {"submission_id": sid})
+    check("a student may not fix a transcription",
+          student.call("fix_cq_transcription", {
+              "submission_id": sid, "line_index": 0, "text": "x"}).get("_isError") is True)
+    check("a student may not regrade",
+          student.call("regrade_cq_script", {"submission_id": sid}).get("_isError") is True)
+    check("empty replacement text is refused",
+          other.call("fix_cq_transcription", {
+              "submission_id": sid, "line_index": 0, "text": "  "}).get("_isError") is True)
+    check("a negative line index is refused",
+          other.call("fix_cq_transcription", {
+              "submission_id": sid, "line_index": -1, "text": "x"}).get("_isError") is True)
+
+    fixed = other.call("fix_cq_transcription", {
+        "submission_id": sid, "line_index": 0, "text": "ক) ত্বরণ হলো বেগের পরিবর্তনের হার।"})
+    check("a teacher can correct a line", fixed.get("_isError") is False,
+          str(fixed.get("error"))[:90])
+    check("stale marks cannot be released",
+          other.call("release_cq_marks", {"submission_id": sid}).get("_isError") is True)
+
+    again = other.call("regrade_cq_script", {"submission_id": sid})
+    check("marking again succeeds", again.get("_isError") is False, str(again.get("error"))[:90])
+    check("and it is releasable once more", again.get("status") == "awaiting_teacher",
+          str(again.get("status")))
+    check("still four marks after regrading", len(again.get("marks", [])) == 4)
+    check("total still equals the sum",
+          again.get("total_awarded") == sum(m["awarded"] for m in again.get("marks", [])))
+    assert lines_before is not None
 
     print("\n\033[1mrelease\033[0m")
     out = other.call("release_cq_marks", {"submission_id": sid})

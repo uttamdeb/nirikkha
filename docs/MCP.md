@@ -135,6 +135,18 @@ correction and the student is shown who made it. The total is recomputed here.
 
 Teachers only. `submission_id`, `feedback`. Same attribution rules.
 
+### `fix_cq_transcription` — correct a misread line
+
+Teachers only. `submission_id`, `line_index`, `text`. For when the reader read
+the handwriting *wrongly*, as opposed to failing to read it. Marks computed from
+the old text go stale and cannot be released until `regrade_cq_script` runs.
+
+### `regrade_cq_script` — mark it again
+
+Teachers only. `submission_id`. Discards the previous marks and any teacher
+rewrites of the marker's wording, because the agent is now speaking about text
+it has not seen before. 10–30 seconds.
+
 ### `release_cq_marks` — publish to the student
 
 Teachers only. `submission_id`. Refused when the transcript changed after
