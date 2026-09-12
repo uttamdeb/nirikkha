@@ -14,10 +14,11 @@ from . import db, settings_store
 from .agents.base import AgentError
 from .auth import Caller, require_teacher
 from .rubric import (
-    DEFAULT_CQ_RUBRIC,
     generate_exam_code,
     is_valid_rubric,
+    normalize_rubric,
     rubric_to_probable_answer,
+    sum_rubric_marks,
 )
 from .telegram import client as tg
 from .telegram import enroll
@@ -59,13 +60,38 @@ class CreateExam(BaseModel):
     publish_mode: Literal["auto", "admin"] | None = None
 
 
+class RubricPartIn(BaseModel):
+    key: Literal["ka", "kha", "ga", "gha"]
+    label: str = Field(min_length=1, max_length=20)
+    title: str = Field(min_length=1, max_length=80)
+    prompt: str = Field(default="", max_length=8_000)
+    modelAnswer: str = Field(default="", max_length=8_000)
+    maxMarks: int = Field(gt=0, le=100)
+
+    model_config = {"extra": "ignore"}
+
+
 class CreateQuestion(BaseModel):
-    prompt_text: str = Field(default="", max_length=20_000)
+    prompt_text: str = Field(min_length=1, max_length=20_000)
     probable_answer: str | None = Field(default=None, max_length=20_000)
     total_marks: int = Field(default=10, ge=1, le=100)
-    rubric_json: list[dict[str, Any]] | None = None
+    rubric_json: list[RubricPartIn] | None = None
     approved: bool = True
-    order: int = Field(default=0, ge=0)
+    order: int | None = Field(default=None, ge=0)
+
+
+class UpdateExam(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    publish_mode: Literal["auto", "admin"] | None = None
+
+
+class UpdateQuestion(BaseModel):
+    prompt_text: str | None = Field(default=None, min_length=1, max_length=20_000)
+    probable_answer: str | None = Field(default=None, max_length=20_000)
+    total_marks: int | None = Field(default=None, ge=1, le=100)
+    rubric_json: list[RubricPartIn] | None = None
+    approved: bool | None = None
+    order: int | None = Field(default=None, ge=0)
 
 
 class PublishExam(BaseModel):
@@ -381,32 +407,132 @@ async def add_question(
     _caller: Caller = Depends(require_teacher),
 ) -> dict[str, Any]:
     exam = await db.select_one(
-        "exams", params={"id": f"eq.{exam_id}", "select": "id"}
+        "exams", params={"id": f"eq.{exam_id}", "select": "id,status"}
     )
     if not exam:
         raise HTTPException(404, "Exam not found")
-    rubric = body.rubric_json or DEFAULT_CQ_RUBRIC
+    if exam.get("status") == "closed":
+        raise HTTPException(400, "Cannot add questions to a closed exam")
+
+    rubric = normalize_rubric(
+        [p.model_dump() for p in body.rubric_json] if body.rubric_json else None
+    )
     if not is_valid_rubric(rubric, body.total_marks):
         raise HTTPException(
             400,
-            "rubric_json must have four parts (ka/kha/ga/gha) whose marks sum to total_marks",
+            f"Rubric part marks must sum to total_marks "
+            f"({sum_rubric_marks(rubric)} != {body.total_marks})",
         )
+
+    existing = await db.select(
+        "questions",
+        params={"exam_id": f"eq.{exam_id}", "select": "id"},
+    )
+    order = body.order if body.order is not None else len(existing)
     probable = body.probable_answer or rubric_to_probable_answer(rubric)
     rows = await db.insert(
         "questions",
         {
             "exam_id": exam_id,
             "type": "cq",
-            "prompt_text": body.prompt_text,
+            "prompt_text": body.prompt_text.strip(),
             "probable_answer": probable,
             "rubric_json": rubric,
             "total_marks": body.total_marks,
             "source": "manual",
-            "order": body.order,
+            "order": order,
             "approved": body.approved,
         },
     )
     return {"question": rows[0]}
+
+
+@router.patch("/exams/{exam_id}")
+async def update_exam(
+    exam_id: str,
+    body: UpdateExam,
+    _caller: Caller = Depends(require_teacher),
+) -> dict[str, Any]:
+    exam = await db.select_one(
+        "exams", params={"id": f"eq.{exam_id}", "select": "*"}
+    )
+    if not exam:
+        raise HTTPException(404, "Exam not found")
+    payload: dict[str, Any] = {}
+    if body.title is not None:
+        payload["title"] = body.title.strip()
+    if "publish_mode" in body.model_fields_set:
+        payload["publish_mode"] = body.publish_mode
+    if not payload:
+        return {"exam": exam}
+    rows = await db.update(
+        "exams", params={"id": f"eq.{exam_id}"}, payload=payload
+    )
+    return {"exam": rows[0] if rows else exam}
+
+
+@router.patch("/exams/{exam_id}/questions/{question_id}")
+async def update_question(
+    exam_id: str,
+    question_id: str,
+    body: UpdateQuestion,
+    _caller: Caller = Depends(require_teacher),
+) -> dict[str, Any]:
+    question = await db.select_one(
+        "questions",
+        params={
+            "id": f"eq.{question_id}",
+            "exam_id": f"eq.{exam_id}",
+            "select": "*",
+        },
+    )
+    if not question:
+        raise HTTPException(404, "Question not found")
+
+    payload: dict[str, Any] = {}
+    if body.prompt_text is not None:
+        payload["prompt_text"] = body.prompt_text.strip()
+    if body.probable_answer is not None:
+        payload["probable_answer"] = body.probable_answer
+    if body.approved is not None:
+        payload["approved"] = body.approved
+    if body.order is not None:
+        payload["order"] = body.order
+
+    total_marks = body.total_marks if body.total_marks is not None else int(
+        question.get("total_marks") or 10
+    )
+    if body.rubric_json is not None:
+        rubric = normalize_rubric([p.model_dump() for p in body.rubric_json])
+        if not is_valid_rubric(rubric, total_marks):
+            raise HTTPException(
+                400,
+                f"Rubric part marks must sum to total_marks "
+                f"({sum_rubric_marks(rubric)} != {total_marks})",
+            )
+        payload["rubric_json"] = rubric
+        payload["total_marks"] = total_marks
+        if body.probable_answer is None:
+            payload["probable_answer"] = rubric_to_probable_answer(rubric)
+    elif body.total_marks is not None:
+        existing_rubric = question.get("rubric_json")
+        if isinstance(existing_rubric, list) and not is_valid_rubric(
+            normalize_rubric(existing_rubric), total_marks
+        ):
+            raise HTTPException(
+                400,
+                "total_marks does not match existing rubric part marks; send rubric_json too",
+            )
+        payload["total_marks"] = total_marks
+
+    if not payload:
+        return {"question": question}
+    rows = await db.update(
+        "questions",
+        params={"id": f"eq.{question_id}", "exam_id": f"eq.{exam_id}"},
+        payload=payload,
+    )
+    return {"question": rows[0] if rows else question}
 
 
 @router.post("/exams/{exam_id}/questions/{question_id}/approve")
@@ -466,18 +592,31 @@ async def generate_exam_questions(
         raise HTTPException(400, str(exc)) from exc
 
     created = []
+    existing = await db.select(
+        "questions",
+        params={"exam_id": f"eq.{exam_id}", "select": "id"},
+    )
+    base_order = len(existing)
     for index, q in enumerate(result["questions"]):
+        rubric = normalize_rubric(q.get("rubric"))
+        total_marks = int(q.get("totalMarks") or sum_rubric_marks(rubric) or 10)
+        if not is_valid_rubric(rubric, total_marks):
+            # Fall back to normalised defaults that always sum correctly.
+            from .rubric import DEFAULT_CQ_RUBRIC
+            rubric = normalize_rubric(DEFAULT_CQ_RUBRIC)
+            total_marks = sum_rubric_marks(rubric)
         rows = await db.insert(
             "questions",
             {
                 "exam_id": exam_id,
                 "type": "cq",
-                "prompt_text": q["promptText"],
-                "probable_answer": q["probableAnswer"],
-                "rubric_json": q["rubric"],
-                "total_marks": q["totalMarks"],
+                "prompt_text": (q.get("promptText") or "").strip() or "Generated CQ",
+                "probable_answer": q.get("probableAnswer")
+                or rubric_to_probable_answer(rubric),
+                "rubric_json": rubric,
+                "total_marks": total_marks,
                 "source": "generated",
-                "order": index,
+                "order": base_order + index,
                 "approved": False,
             },
         )

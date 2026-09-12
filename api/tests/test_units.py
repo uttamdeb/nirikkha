@@ -220,10 +220,11 @@ def test_bbox_flags_degenerate_boxes():
 
 def test_override_cannot_exceed_the_part_maximum():
     OverrideMark(part="gha", new_awarded=4)
+    OverrideMark(part="ka", new_awarded=2)  # exam rubrics may raise the ka cap
     with pytest.raises(ValueError):
-        OverrideMark(part="ka", new_awarded=2)
+        OverrideMark(part="ga", new_awarded=101)
     with pytest.raises(ValueError):
-        OverrideMark(part="ga", new_awarded=4)
+        OverrideMark(part="ka")
 
 
 def test_grade_result_requires_all_four_parts():
@@ -235,12 +236,28 @@ def test_grade_result_requires_all_four_parts():
 
 def test_exam_code_shape(monkeypatch):
     monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "unit-test-key-not-for-prod")
-    from app.rubric import generate_exam_code, is_valid_rubric, DEFAULT_CQ_RUBRIC
+    from app.rubric import (
+        generate_exam_code,
+        is_valid_rubric,
+        normalize_rubric,
+        rubric_max_by_part,
+        DEFAULT_CQ_RUBRIC,
+    )
 
     code = generate_exam_code()
     assert code.startswith("NK-")
     assert len(code) == 7
     assert is_valid_rubric(DEFAULT_CQ_RUBRIC, 10)
+
+    custom = normalize_rubric([
+        {"key": "ka", "label": "ক", "title": "জ্ঞান", "prompt": "a", "modelAnswer": "", "maxMarks": 2},
+        {"key": "kha", "label": "খ", "title": "অনুধাবন", "prompt": "b", "modelAnswer": "", "maxMarks": 2},
+        {"key": "ga", "label": "গ", "title": "প্রয়োগ", "prompt": "c", "modelAnswer": "", "maxMarks": 3},
+        {"key": "gha", "label": "ঘ", "title": "উচ্চতর দক্ষতা", "prompt": "d", "modelAnswer": "", "maxMarks": 3},
+    ])
+    assert is_valid_rubric(custom, 10)
+    assert rubric_max_by_part(custom)["ka"] == 2
+    assert not is_valid_rubric(custom, 9)
 
 
 def test_encrypt_roundtrip(monkeypatch):

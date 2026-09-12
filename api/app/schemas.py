@@ -161,9 +161,10 @@ class OverrideMark(BaseModel):
 
     @model_validator(mode="after")
     def sane(self) -> OverrideMark:
-        cap = CQ_PARTS[self.part][1]
-        if self.new_awarded is not None and self.new_awarded > cap:
-            raise ValueError(f"part {self.part} is out of {cap}")
+        # Cap is enforced against the stored mark's max_marks in the pipeline —
+        # exam rubrics may differ from the default 1/2/3/4 scheme.
+        if self.new_awarded is not None and self.new_awarded > 100:
+            raise ValueError(f"part {self.part} is out of range")
         if self.new_awarded is None and self.reason is None and self.improvement is None:
             raise ValueError("nothing to change")
         return self

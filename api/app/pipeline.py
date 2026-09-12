@@ -161,6 +161,12 @@ async def run_ocr(submission_id: str) -> dict[str, Any]:
 async def run_grading(submission_id: str) -> dict[str, Any]:
     """Stage 2 — mark the transcript. Lands in `awaiting_teacher`, never
     straight to `released`: a human always releases."""
+    from .rubric import (
+        build_exam_question_text,
+        rubric_max_by_part,
+        sum_rubric_marks,
+    )
+
     submission = await db.select_one("submissions", params={"id": f"eq.{submission_id}", "select": "*"})
     if not submission:
         raise AgentError(f"submission {submission_id} not found")
@@ -173,15 +179,43 @@ async def run_grading(submission_id: str) -> dict[str, Any]:
 
     has_text = any((line.get("clarified_text") or line.get("text") or "").strip() for line in lines)
 
+    question_text = submission.get("question_text") or ""
+    part_max = None
+    total_max = sum(m for _, m, _ in CQ_PARTS.values())
+
+    exam_id = submission.get("exam_id")
+    if exam_id:
+        questions = await db.select(
+            "questions",
+            params={
+                "exam_id": f"eq.{exam_id}",
+                "approved": "eq.true",
+                "select": "*",
+                "order": "order.asc",
+                "limit": 1,
+            },
+        )
+        if questions:
+            q = questions[0]
+            rubric = q.get("rubric_json")
+            if isinstance(rubric, list):
+                part_max = rubric_max_by_part(rubric)
+                total_max = int(q.get("total_marks") or sum_rubric_marks(rubric) or total_max)
+                question_text = build_exam_question_text(q.get("prompt_text") or "", rubric)
+            elif q.get("total_marks"):
+                total_max = int(q["total_marks"])
+            if not question_text:
+                question_text = q.get("prompt_text") or ""
+
     try:
         if not has_text:
             # No model call on an empty page — cheaper, and it cannot hallucinate.
-            result = blank_answer_result()
+            result = blank_answer_result(part_max)
             grader_name = "short-circuit:blank"
         else:
             transcript = build_transcript(lines)
             grader = get_grader()
-            result = await grader.grade(submission.get("question_text") or "", transcript)
+            result = await grader.grade(question_text, transcript, part_max=part_max)
             grader_name = f"{grader.name}:{settings.grader_model}"
         # Persisting is inside the try on purpose: a write that fails here used
         # to leave the submission stuck in `grading` with no error recorded and
@@ -239,7 +273,7 @@ async def run_grading(submission_id: str) -> dict[str, Any]:
         feedback_edited_by=None,
         feedback_edited_at=None,
         total_awarded=result.total_awarded,
-        total_max=sum(m for _, m, _ in CQ_PARTS.values()),
+        total_max=total_max,
         feedback=result.feedback,
         grader_model=grader_name,
         needs_human_review=bool(review_reason),
@@ -334,7 +368,7 @@ async def apply_override(
     changes: dict[str, Any] = {}
 
     if new_awarded is not None:
-        cap = CQ_PARTS[part][1]
+        cap = int(current.get("max_marks") or CQ_PARTS[part][1])
         if not 0 <= new_awarded <= cap:
             raise AgentError(f"part {part} is out of {cap}")
         if new_awarded != old:
