@@ -54,6 +54,19 @@ log = logging.getLogger("nirikkha")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    if not settings.settings_encryption_key:
+        log.warning(
+            "SETTINGS_ENCRYPTION_KEY is not set — saving a Telegram bot token will fail"
+        )
+    if not settings.app_url:
+        log.warning("APP_URL is not set — Telegram setWebhook will fail")
+    elif "localhost" in settings.app_url or "127.0.0.1" in settings.app_url:
+        log.warning(
+            "APP_URL=%s is not publicly reachable — use an ngrok HTTPS origin for Telegram",
+            settings.app_url,
+        )
+    else:
+        log.info("APP_URL=%s", settings.app_url)
     yield
     await db.aclose()
 
