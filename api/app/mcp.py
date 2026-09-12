@@ -559,8 +559,10 @@ async def _tool_list(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
 
     needle = str(args.get("student") or "").strip().lower()
     # Searching spans the whole set and reaches into another table, so fetch
-    # wide and narrow here rather than paging a filtered query.
-    params["limit"] = 1000 if needle else limit
+    # wide and narrow here rather than paging a filtered query. Otherwise take
+    # one more row than asked for — without it `more` compares a list against
+    # itself and is always false, which reads as "that is everything".
+    params["limit"] = 1000 if needle else limit + 1
     rows = await db.select("submissions", params=params)
 
     people: dict[str, dict[str, Any]] = {}
