@@ -117,11 +117,14 @@ async def patch_settings(
             publish_mode=body.publish_mode,
         )
         return await settings_store.get_public_settings()
+    # DbError subclasses RuntimeError, so it has to be caught first or the
+    # broader handler below swallows it and reports a failed database write as
+    # the teacher's bad request.
+    except db.DbError as exc:
+        raise HTTPException(502, f"Could not save settings: {exc}") from exc
     except RuntimeError as exc:
         # Missing SETTINGS_ENCRYPTION_KEY (or similar) — surface to the UI.
         raise HTTPException(400, str(exc)) from exc
-    except db.DbError as exc:
-        raise HTTPException(502, f"Could not save settings: {exc}") from exc
 
 
 @router.post("/telegram/connect")
