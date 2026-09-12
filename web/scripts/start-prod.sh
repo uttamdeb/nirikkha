@@ -5,7 +5,7 @@ API_PORT="${API_PORT:-8100}"
 export API_PROXY_URL="http://127.0.0.1:${API_PORT}"
 
 # FastAPI on loopback; Next listens on Cloud Run $PORT.
-uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT" --workers 1 &
+python3 -m uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT" --workers 1 &
 API_PID=$!
 
 shutdown() {

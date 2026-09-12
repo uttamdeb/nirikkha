@@ -28,7 +28,7 @@ function Home() {
 
   return (
     <TeacherOnly>
-      <PageShell title={t("navPanel")}>
+      <PageShell title={t("navPanel")} description={t("panelLede")}>
         <PanelPageView />
       </PageShell>
     </TeacherOnly>
