@@ -25,7 +25,7 @@ const STRINGS = {
   navMine: { bn: "আমার খাতা", en: "My scripts" },
   navAll: { bn: "সব খাতা", en: "All scripts" },
   navReview: { bn: "রিভিউ", en: "Review" },
-  navPanel: { bn: "কমান্ড সেন্টার", en: "Dashboard" },
+  navPanel: { bn: "শিক্ষক প্যানেল", en: "Teachers panel" },
   navBatches: { bn: "ব্যাচ", en: "Batches" },
   navExams: { bn: "পরীক্ষা", en: "Exams" },
   navSettings: { bn: "সেটিংস", en: "Settings" },
@@ -51,7 +51,7 @@ const STRINGS = {
   allExams: { bn: "সব পরীক্ষা", en: "All exams" },
   scriptStudio: { bn: "স্ক্রিপ্ট স্টুডিও", en: "Script studio" },
   hitlSubtitle: { bn: "HITL বাংলা গ্রেডার", en: "HITL Bangla Grader" },
-  commandCenter: { bn: "কমান্ড সেন্টার", en: "Command center" },
+  commandCenter: { bn: "শিক্ষক প্যানেল", en: "Teachers panel" },
   commandCenterLede: {
     bn: "কী গ্রেড করতে হবে, আর স্ট্যাক প্রস্তুত কি না।",
     en: "What needs grading, and whether the stack is ready.",

@@ -7,7 +7,7 @@ import { useAuth } from "@/components/providers";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { LoadingBlock } from "@/components/feedback/loading-block";
 
-export default function DashboardLayout({
+function DashboardShell({
   children,
 }: {
   children: React.ReactNode;
@@ -35,5 +35,20 @@ export default function DashboardLayout({
       <AppSidebar />
       <SidebarInset>{children}</SidebarInset>
     </SidebarProvider>
+  );
+}
+
+import { Providers } from "@/components/providers";
+
+/** The app boots here: everything below needs a session. */
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <Providers>
+      <DashboardShell>{children}</DashboardShell>
+    </Providers>
   );
 }

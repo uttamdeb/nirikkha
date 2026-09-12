@@ -30,7 +30,7 @@ export function DashboardHeader({ title, breadcrumbs = [] }: DashboardHeaderProp
           <BreadcrumbList>
             <BreadcrumbItem className="hidden md:block">
               <BreadcrumbLink asChild>
-                <Link href="/">Nirikkha</Link>
+                <Link href="/dashboard">Nirikkha</Link>
               </BreadcrumbLink>
             </BreadcrumbItem>
             {breadcrumbs.map((crumb) => (

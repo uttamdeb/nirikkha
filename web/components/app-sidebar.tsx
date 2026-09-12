@@ -42,7 +42,7 @@ export function AppSidebar({
   const teacherItems = [
     {
       title: t("navPanel"),
-      url: "/",
+      url: "/dashboard",
       icon: <LayoutDashboardIcon />,
       items: [] as { title: string; url: string }[],
     },

@@ -41,7 +41,7 @@ export default function InboxPage() {
           description={t("inboxEmpty")}
           action={
             <Button asChild>
-              <Link href="/">{t("submitFirst")}</Link>
+              <Link href="/submit">{t("submitFirst")}</Link>
             </Button>
           }
         />

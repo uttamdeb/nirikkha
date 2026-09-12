@@ -326,7 +326,7 @@ export default function ResultPage({ id, isTeacher }: ResultPageProps) {
                   </p>
                 ) : null}
                 <p>
-                  <Link href="/" className="underline underline-offset-4">
+                  <Link href="/submit" className="underline underline-offset-4">
                     {t("submitTitle")}
                   </Link>
                 </p>
