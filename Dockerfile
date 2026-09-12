@@ -27,7 +27,8 @@ WORKDIR /app
 
 RUN pip3 install --break-system-packages --no-cache-dir \
       "fastapi>=0.115" "uvicorn[standard]>=0.32" "pydantic>=2.9" "httpx>=0.27" \
-      "python-multipart>=0.0.12" "google-genai>=0.8" "openai>=1.55"
+      "python-multipart>=0.0.12" "google-genai>=0.8" "openai>=1.55" \
+      "cryptography>=43"
 
 COPY api/app ./app
 COPY --from=web /web /app/web
