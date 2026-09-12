@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>নিরীক্ষা · Nirikkha</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&family=Noto+Serif+Bengali:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=Roboto:wght@500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <style>
+      /* Shown until the app has its runtime config and mounts, so the first
+         paint is never an empty page. */
+      /* Only the placeholder is styled here. An earlier attempt set
+         body{background} inline, which sits later in the cascade than the
+         stylesheet link and so overrode the themed background permanently —
+         light text on a light ground in dark mode. */
+      #boot {
+        min-height: 60vh; display: grid; place-items: center;
+        font-family: "Noto Sans Bengali", system-ui, sans-serif; color: #72777d;
+      }
+    </style>
+    <div id="root"><div id="boot">নিরীক্ষা চালু হচ্ছে…</div></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,31 @@
+[project]
+name = "nirikkha-api"
+version = "0.1.0"
+description = "Marking agent for handwritten Bangla CQ answer scripts"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "httpx>=0.27",
+  "python-multipart>=0.0.12",
+  "google-genai>=0.8",
+  "openai>=1.55",
+  "PyJWT>=2.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "anyio>=4.6"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+# B008 flags Depends()/File() in argument defaults, which is exactly how FastAPI
+# declares dependencies. RUF001 flags en dashes in prose.
+ignore = ["B008", "E501", "RUF001", "RUF002", "RUF003"]
