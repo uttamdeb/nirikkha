@@ -21,7 +21,7 @@ export function BrandMark({ className, size = "md" }: BrandMarkProps) {
   return (
     <div
       className={cn(
-        "flex items-center justify-center overflow-hidden rounded-xl bg-sidebar-primary shadow-sm brand-ink-fade",
+        "flex items-center justify-center overflow-hidden rounded-xl brand-ink-fade",
         SIZES[size],
         className
       )}
