@@ -219,6 +219,28 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   );
 }
 
+export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  const headers = { ...(await authHeader()), "Content-Type": "application/json" };
+  return unwrap<T>(
+    await fetch(`${API_BASE}${path}`, {
+      method: "PATCH",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  );
+}
+
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const headers = { ...(await authHeader()), "Content-Type": "application/json" };
+  return unwrap<T>(
+    await fetch(`${API_BASE}${path}`, {
+      method: "PUT",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  );
+}
+
 export const MAX_PAGES = 3;
 
 export async function createSubmission(

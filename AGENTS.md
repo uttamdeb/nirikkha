@@ -31,6 +31,8 @@ api/app/
   agents/ocr.py       reads a script into numbered lines; providers behind OcrProvider
   agents/grader.py    marks a transcript; providers behind GraderProvider
   agents/base.py      JSON coercion, retries, strict int parsing
+  telegram/           Bot API client, enroll, sessions, webhook
+  classroom.py        teacher settings, batches, exams, publish
   prompts.py          the OCR uncertainty policy and the CQ rubric
   pipeline.py         read → gate → grade → review → release
   mcp.py              MCP server (4 tools)
@@ -40,6 +42,8 @@ supabase/migrations/  schema and RLS
 scripts/set_role.py   grant the teacher role
 ```
 
+Telegram, batches and exams need `APP_URL` (public HTTPS for `setWebhook`) and
+`SETTINGS_ENCRYPTION_KEY` (AES-256-GCM for the bot token in `org_settings`).
 ## Two agents, on purpose
 
 OCR reads; grading only ever sees text. Either swaps without touching the other, and
@@ -127,7 +131,10 @@ at 32 MiB, which is why uploads are limited to 3 pages and 28 MB in total.
 
 - **`LEGIBILITY_THRESHOLD` (0.65) is uncalibrated on real handwriting.** Every real sample
   tried so far was a photographed textbook page, correctly refused, so nothing reached the
-  scoring path. One legible handwritten script closes this.
+  scoring path. One legible handwritten script closes this. Org settings may override the
+  threshold via `org_settings.ocr_confidence_threshold`.
 - No bounding boxes from the reader (`supports_bbox: false`); teacher annotations are
   drawn by hand and do not depend on them.
-- No Telegram, exams or batches. They sit downstream of group sync.
+- Multi-question exams only grade `questions[0]` (same as the upstream classroom app).
+- Telegram-provisioned students use synthetic `tg_{id}@bot.local` accounts; there is no
+  web account-linking UI yet.

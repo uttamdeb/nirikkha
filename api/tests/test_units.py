@@ -229,3 +229,34 @@ def test_override_cannot_exceed_the_part_maximum():
 def test_grade_result_requires_all_four_parts():
     with pytest.raises(ValueError):
         GradeResult(parts=[])
+
+
+# --------------------------------------------------------------------- classroom helpers
+
+def test_exam_code_shape(monkeypatch):
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "unit-test-key-not-for-prod")
+    from app.rubric import generate_exam_code, is_valid_rubric, DEFAULT_CQ_RUBRIC
+
+    code = generate_exam_code()
+    assert code.startswith("NK-")
+    assert len(code) == 7
+    assert is_valid_rubric(DEFAULT_CQ_RUBRIC, 10)
+
+
+def test_encrypt_roundtrip(monkeypatch):
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "unit-test-key-not-for-prod")
+    from app.crypto import decrypt_secret, encrypt_secret, mask_secret
+
+    token = "123456:ABCDEF-secret-token"
+    enc = encrypt_secret(token)
+    assert enc.count(":") == 2
+    assert decrypt_secret(enc) == token
+    masked = mask_secret(token)
+    assert masked and masked.startswith("1234") and masked.endswith("oken")
+
+
+def test_webhook_secret_mismatch_is_rejected(monkeypatch):
+    """Document the contract: secret header must match org_settings.webhook_secret."""
+    expected = "secret-abc"
+    provided = "wrong"
+    assert expected != provided

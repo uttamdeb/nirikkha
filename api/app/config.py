@@ -50,6 +50,12 @@ class Settings:
     # Gate
     legibility_threshold: float = field(default_factory=lambda: _env_float("LEGIBILITY_THRESHOLD", 0.65))
 
+    # Public base URL for Telegram setWebhook (no trailing slash).
+    app_url: str = field(default_factory=lambda: _env("APP_URL").rstrip("/"))
+    settings_encryption_key: str = field(
+        default_factory=lambda: _env("SETTINGS_ENCRYPTION_KEY")
+    )
+
     # HTTP
     cors_origins: str = field(default_factory=lambda: _env("CORS_ORIGINS", "*"))
     port: int = field(default_factory=lambda: int(_env("PORT", "8080")))

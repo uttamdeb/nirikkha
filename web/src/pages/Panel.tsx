@@ -26,6 +26,10 @@ export default function PanelPageView() {
   const [status, setStatus] = useState<string>("all");
   const [flagged, setFlagged] = useState(false);
   const [query, setQuery] = useState("");
+  const [examId, setExamId] = useState("");
+  const [batchId, setBatchId] = useState("");
+  const [exams, setExams] = useState<{ id: string; title: string }[]>([]);
+  const [batches, setBatches] = useState<{ id: string; name: string }[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<PanelRow[]>([]);
   const [offset, setOffset] = useState(0);
@@ -42,9 +46,11 @@ export default function PanelPageView() {
       if (status !== "all") params.set("status", status);
       if (flagged) params.set("flagged", "true");
       if (query.trim()) params.set("q", query.trim());
+      if (examId) params.set("exam_id", examId);
+      if (batchId) params.set("batch_id", batchId);
       return apiGet<PanelPage>(`/api/teacher/panel?${params}`);
     },
-    [status, flagged, query],
+    [status, flagged, query, examId, batchId],
   );
 
   const load = useCallback(async () => {
@@ -82,6 +88,12 @@ export default function PanelPageView() {
 
   useEffect(() => {
     apiGet<TeacherStats>("/api/teacher/stats").then(setStats).catch(() => setStats(null));
+    apiGet<{ exams: { id: string; title: string }[] }>("/api/teacher/exams")
+      .then((d) => setExams(d.exams))
+      .catch(() => setExams([]));
+    apiGet<{ batches: { id: string; name: string }[] }>("/api/teacher/batches")
+      .then((d) => setBatches(d.batches))
+      .catch(() => setBatches([]));
   }, []);
 
   // Only a marked, non-stale script can be released, so anything else is not
@@ -213,6 +225,32 @@ export default function PanelPageView() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("searchPlaceholder")}
         />
+        <select
+          className="search"
+          value={examId}
+          onChange={(e) => setExamId(e.target.value)}
+          aria-label={t("examsTitle")}
+        >
+          <option value="">{t("examsTitle")}: —</option>
+          {exams.map((exam) => (
+            <option key={exam.id} value={exam.id}>
+              {exam.title}
+            </option>
+          ))}
+        </select>
+        <select
+          className="search"
+          value={batchId}
+          onChange={(e) => setBatchId(e.target.value)}
+          aria-label={t("batchesTitle")}
+        >
+          <option value="">{t("batchesTitle")}: —</option>
+          {batches.map((batch) => (
+            <option key={batch.id} value={batch.id}>
+              {batch.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {picked.size > 0 && (

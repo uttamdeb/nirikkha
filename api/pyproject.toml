@@ -12,6 +12,7 @@ dependencies = [
   "google-genai>=0.8",
   "openai>=1.55",
   "PyJWT>=2.9",
+  "cryptography>=43",
 ]
 
 [project.optional-dependencies]

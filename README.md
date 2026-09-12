@@ -62,10 +62,17 @@ silently disappearing when a capability is missing.
 - **Web** — Bangla-first, English mirror, light and dark. Students submit and resolve
   unclear lines.
 - **Teacher panel** — every submission, not just the flagged ones: filter by status,
-  search by student or subject, correct any transcribed line, mark again, draw
-  annotations on the page, write a note to the student, and release singly or in bulk.
+  exam, or batch; search by student or subject; correct any transcribed line, mark again,
+  draw annotations on the page, write a note to the student, and release singly or in bulk.
   Marks show what the agent proposed alongside the current value, and a script whose
   transcript changed after marking cannot be released until it is marked again.
+- **Batches & exams** — teachers link Telegram groups to batches, enroll students, create
+  CQ exams (manual or generated), and publish an exam to a batch (`NK-XXXX` code + group
+  announcement).
+- **Telegram bot** — configure the token under Settings, connect the webhook to
+  `APP_URL/api/telegram/webhook`. Students register in the group, DM the bot with the exam
+  code, and upload a photo; results are DMed on release (or immediately when publish mode
+  is `auto`).
 - **MCP** — `POST /mcp`, four tools: `check_cq_script`, `clarify_unclear_line`,
   `get_cq_result`, `get_cq_rubric`. Deliberately narrow: a channel to the agent, not a
   window into the database.
@@ -103,18 +110,19 @@ send your answer with `clarify_unclear_line`; marking resumes on its own.
 ## Running locally
 
 ```bash
-cp .env.example .env          # fill in Supabase + model keys
+cp .env.example .env          # fill in Supabase + model keys + APP_URL + SETTINGS_ENCRYPTION_KEY
 uv venv && . .venv/bin/activate
-uv pip install fastapi 'uvicorn[standard]' pydantic httpx python-multipart google-genai openai
+uv pip install -e '.[dev]'   # or: fastapi uvicorn pydantic httpx python-multipart google-genai openai cryptography
 cd api && uvicorn app.main:app --reload --port 8099
 ```
+
+For local Telegram webhooks, expose the API with ngrok (or similar) and set `APP_URL` to
+that HTTPS origin, then use **Settings → Save & connect webhook**. Apply
+`supabase/migrations/` (including `0008_classroom.sql`) before first run.
 
 ```bash
 cd web && npm install && npm run dev
 ```
-
-The database schema is in `supabase/migrations/`; apply it to a fresh project before first
-run.
 
 ## Granting the teacher role
 

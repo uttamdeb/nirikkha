@@ -20,6 +20,35 @@ from .schemas import CQ_PARTS, SubmissionStatus
 log = logging.getLogger("nirikkha.pipeline")
 
 
+async def _effective_threshold() -> float:
+    try:
+        from . import settings_store
+        org = await settings_store.get_org_settings()
+        value = org.get("ocr_confidence_threshold")
+        if value is not None:
+            return float(value)
+    except Exception:
+        pass
+    return settings.legibility_threshold
+
+
+async def _exam_publish_mode(submission: dict[str, Any]) -> str:
+    """Resolve publish mode: exam override → org default → admin."""
+    exam_id = submission.get("exam_id")
+    if exam_id:
+        exam = await db.select_one(
+            "exams", params={"id": f"eq.{exam_id}", "select": "publish_mode"}
+        )
+        if exam and exam.get("publish_mode"):
+            return exam["publish_mode"]
+    try:
+        from . import settings_store
+        org = await settings_store.get_org_settings()
+        return org.get("publish_mode") or "admin"
+    except Exception:
+        return "admin"
+
+
 async def _set_status(
     submission_id: str, status: SubmissionStatus, **fields: Any
 ) -> None:
@@ -100,7 +129,7 @@ async def run_ocr(submission_id: str) -> dict[str, Any]:
             for line in result.lines
         ])
 
-    threshold = settings.legibility_threshold
+    threshold = await _effective_threshold()
     stored = await db.select("ocr_lines", params={
         "submission_id": f"eq.{submission_id}", "select": "*", "order": "line_index.asc",
     })
@@ -186,12 +215,21 @@ async def run_grading(submission_id: str) -> dict[str, Any]:
         await _fail(submission_id, f"Grading failed: {exc}")
         raise
 
+    threshold = await _effective_threshold()
     still_unclear = any(
-        needs_clarification(line, settings.legibility_threshold) for line in lines
+        needs_clarification(line, threshold) for line in lines
     )
     review_reason = (
         "grader_uncertain" if result.grader_uncertain
         else ("low_legibility" if still_unclear else None)
+    )
+
+    publish_mode = await _exam_publish_mode(submission)
+    can_auto = (
+        publish_mode == "auto"
+        and not review_reason
+        and not still_unclear
+        and not result.grader_uncertain
     )
 
     await _set_status(
@@ -207,6 +245,18 @@ async def run_grading(submission_id: str) -> dict[str, Any]:
         needs_human_review=bool(review_reason),
         review_reason=review_reason,
     )
+
+    if can_auto:
+        released = await release(submission_id, teacher_id=None)
+        await notify_telegram_release(submission_id)
+        return {
+            "status": SubmissionStatus.RELEASED.value,
+            "total_awarded": result.total_awarded,
+            "grader": grader_name,
+            "needs_human_review": False,
+            "auto_released": True,
+            **released,
+        }
 
     return {
         "status": SubmissionStatus.AWAITING_TEACHER.value,
@@ -236,9 +286,10 @@ async def clarify_line(submission_id: str, line_index: int, text: str) -> dict[s
     lines = await db.select("ocr_lines", params={
         "submission_id": f"eq.{submission_id}", "select": "*", "order": "line_index.asc",
     })
+    threshold = await _effective_threshold()
     remaining = [
         line["line_index"] for line in lines
-        if needs_clarification(line, settings.legibility_threshold)
+        if needs_clarification(line, threshold)
     ]
     if remaining:
         return {"status": SubmissionStatus.AWAITING_STUDENT.value, "flagged_lines": remaining}
@@ -354,6 +405,28 @@ async def release(submission_id: str, teacher_id: str | None = None) -> dict[str
         payload["reviewed_at"] = datetime.now(UTC).isoformat()
     await _set_status(submission_id, SubmissionStatus.RELEASED, **payload)
     return {"status": SubmissionStatus.RELEASED.value, "total_awarded": total}
+
+
+async def notify_telegram_release(submission_id: str) -> None:
+    """DM the student when a Telegram-originated script is released."""
+    row = await db.select_one(
+        "submissions", params={"id": f"eq.{submission_id}", "select": "*"}
+    )
+    if not row or not row.get("telegram_chat_id"):
+        return
+    if row.get("status") != SubmissionStatus.RELEASED.value:
+        return
+    try:
+        from .telegram import client as tg
+        total = row.get("total_awarded")
+        max_marks = row.get("total_max") or 10
+        feedback = (row.get("feedback") or "")[:500]
+        await tg.send_message(
+            row["telegram_chat_id"],
+            f"✅ ফলাফল: <b>{total}/{max_marks}</b>\n{feedback}",
+        )
+    except Exception as exc:
+        log.warning("telegram release notify failed: %s", exc)
 
 
 async def edit_line(submission_id: str, line_index: int, text: str) -> dict[str, Any]:
