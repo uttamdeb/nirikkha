@@ -10,6 +10,7 @@ marks, and that authorisation holds.
 from __future__ import annotations
 
 import os
+import pathlib
 import sys
 import time
 
@@ -63,7 +64,7 @@ def main() -> int:
     c = httpx.Client(timeout=180)
 
     health = c.get(f"{API}/health").json()
-    print(f"\033[1menvironment\033[0m")
+    print("\033[1menvironment\033[0m")
     check("service healthy", health.get("ok") is True)
     check("real OCR engine wired", health["ocr"]["provider"] != "stub", health["ocr"]["provider"])
     check("real grader wired", health["grader"]["provider"] != "stub", health["grader"]["provider"])
@@ -79,7 +80,7 @@ def main() -> int:
     r = c.post(
         f"{API}/api/submissions", headers=student,
         data={"question_text": QUESTION, "subject": "পদার্থবিজ্ঞান"},
-        files={"script": ("script.jpg", open(image_path, "rb").read(), "image/jpeg")},
+        files={"script": ("script.jpg", pathlib.Path(image_path).read_bytes(), "image/jpeg")},
     )
     check("uploaded", r.status_code == 201, r.text[:200])
     if r.status_code != 201:

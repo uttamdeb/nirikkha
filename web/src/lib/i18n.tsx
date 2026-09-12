@@ -206,6 +206,36 @@ const STRINGS = {
   annotationsN: { bn: "{n}টি দাগ", en: "{n} annotations" },
   signOut: { bn: "সাইন আউট", en: "Sign out" },
 
+  consentTitle: { bn: "অ্যাক্সেসের অনুমতি", en: "Approve access" },
+  consentLede: {
+    bn: "{client} তোমার নিরীক্ষা অ্যাকাউন্টে অ্যাক্সেস চাইছে। অনুমতি দিলে এটি তোমার হয়ে খাতা জমা দিতে ও ফলাফল দেখতে পারবে।",
+    en: "{client} is asking for access to your Nirikkha account. Approving lets it submit scripts and read results as you.",
+  },
+  consentClient: { bn: "যে অ্যাপ চাইছে", en: "Requested by" },
+  consentAccount: { bn: "অ্যাকাউন্ট", en: "Account" },
+  consentGrants: { bn: "যা করতে পারবে", en: "What it will be able to do" },
+  consentGrantSubmit: {
+    bn: "তোমার হয়ে উত্তরপত্র জমা দেওয়া ও অস্পষ্ট লাইন সমাধান করা",
+    en: "Submit answer scripts as you, and resolve unclear lines",
+  },
+  consentGrantRead: {
+    bn: "যে খাতাগুলো তুমি দেখতে পাও, সেগুলোর নম্বর ও ফিডব্যাক পড়া",
+    en: "Read marks and feedback for the scripts you can already see",
+  },
+  consentScopes: { bn: "স্কোপ", en: "Scopes" },
+  consentRedirect: { bn: "ফেরত পাঠানো হবে", en: "Redirects to" },
+  consentApprove: { bn: "অনুমতি দাও", en: "Approve" },
+  consentDeny: { bn: "না", en: "Deny" },
+  consentUnnamedClient: { bn: "একটি অ্যাপ", en: "An application" },
+  consentNoRequest: {
+    bn: "কোনো অনুমতির অনুরোধ পাওয়া যায়নি। ক্লায়েন্ট থেকে আবার চেষ্টা করো।",
+    en: "No authorization request found. Start again from the client.",
+  },
+  consentFailed: {
+    bn: "অনুরোধটি পড়া গেল না। সম্ভবত এটির মেয়াদ শেষ হয়ে গেছে।",
+    en: "Could not read that request — it has most likely expired.",
+  },
+
   email: { bn: "ইমেইল", en: "Email" },
   password: { bn: "পাসওয়ার্ড", en: "Password" },
   signIn: { bn: "সাইন ইন", en: "Sign in" },

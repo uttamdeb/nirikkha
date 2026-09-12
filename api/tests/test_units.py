@@ -106,7 +106,7 @@ def test_parse_transcription_numbers_lines_densely_and_drops_blanks():
 
 
 def test_parse_transcription_handles_crlf_and_empty_input():
-    assert [l.text for l in parse_transcription("a\r\nb")] == ["a", "b"]
+    assert [line.text for line in parse_transcription("a\r\nb")] == ["a", "b"]
     assert parse_transcription("") == []
     assert parse_transcription("   \n  ") == []
 

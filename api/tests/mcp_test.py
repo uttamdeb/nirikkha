@@ -102,7 +102,13 @@ def main() -> int:
 
     tools = {t["name"]: t for t in student.rpc("tools/list").json()["result"]["tools"]}
     print("\n\033[1mtools\033[0m")
-    check("four tools exposed", len(tools) == 4, ", ".join(tools))
+    expected = {
+        "check_cq_script", "clarify_unclear_line", "get_cq_result", "list_cq_submissions",
+        "override_cq_mark", "edit_cq_feedback", "release_cq_marks", "get_cq_rubric",
+        "fix_cq_transcription", "regrade_cq_script",
+    }
+    check("the expected tools, and no others", set(tools) == expected,
+          f"extra {set(tools) - expected or '-'}, missing {expected - set(tools) or '-'}")
     check("read tools marked readOnly",
           tools["get_cq_result"]["annotations"]["readOnlyHint"] is True
           and tools["get_cq_rubric"]["annotations"]["readOnlyHint"] is True)
@@ -197,6 +203,146 @@ def main() -> int:
           student.call("get_cq_result",
                        {"submission_id": "00000000-0000-0000-0000-000000000000"}
                        ).get("_isError") is True)
+
+    print("\n\033[1mprotocol edges\033[0m")
+    for version in ("2024-11-05", "2025-03-26", "2025-06-18"):
+        got = anon.rpc("initialize", {"protocolVersion": version}).json()["result"]
+        check(f"initialize echoes {version}", got["protocolVersion"] == version,
+              got["protocolVersion"])
+    unknown = anon.rpc("initialize", {"protocolVersion": "1999-01-01"}).json()["result"]
+    check("an unknown version falls back to ours",
+          unknown["protocolVersion"] == "2025-06-18", unknown["protocolVersion"])
+    check("resources/list is empty, not an error",
+          anon.rpc("resources/list").json()["result"]["resources"] == [])
+    check("prompts/list is empty, not an error",
+          anon.rpc("prompts/list").json()["result"]["prompts"] == [])
+    check("GET is refused", httpx.get(f"{API}/mcp").status_code == 405)
+    check("a batch is refused", httpx.post(
+        f"{API}/mcp", json=[{"jsonrpc": "2.0", "id": 1, "method": "ping"}]).status_code == 400)
+    check("a 401 says where to get a token",
+          "resource_metadata" in (anon.rpc(
+              "tools/call", {"name": "get_cq_rubric", "arguments": {}}
+          ).headers.get("www-authenticate") or ""))
+
+    print("\n\033[1mupload limits\033[0m")
+    one = base64.b64encode(png()).decode()
+    check("four pages are refused", student.call("check_cq_script", {
+        "pages_base64": [one] * 4, "mime_type": "image/png"}).get("_isError") is True)
+    check("nothing at all is refused",
+          student.call("check_cq_script", {"mime_type": "image/png"}).get("_isError") is True)
+    check("a bad mime type is refused", student.call("check_cq_script", {
+        "script_base64": one, "mime_type": "image/gif"}).get("_isError") is True)
+    check("mangled base64 is refused", student.call("check_cq_script", {
+        "script_base64": "not base64!!", "mime_type": "image/png"}).get("_isError") is True)
+    check("an empty page is refused", student.call("check_cq_script", {
+        "script_base64": "", "pages_base64": [""], "mime_type": "image/png"
+    }).get("_isError") is True)
+    # 3 x 8 MB of incompressible noise clears the per-page limit and breaks the total.
+    big = base64.b64encode(os.urandom(8 * 1024 * 1024)).decode()
+    fat = student.call("check_cq_script", {"pages_base64": [big] * 3, "mime_type": "image/png"})
+    check("too many megabytes in total is refused with a limit named",
+          fat.get("_isError") is True and "23 MB" in str(fat.get("error")),
+          str(fat.get("error"))[:90])
+
+    print("\n\033[1mlisting\033[0m")
+    own = student.call("list_cq_submissions", {"limit": 5})
+    check("a student can list their own", own.get("_isError") is False, str(own.get("error"))[:80])
+    check("listed as a student", own.get("viewing_as") == "student")
+    check("their new script is in it",
+          any(x["submission_id"] == sid for x in own.get("submissions", [])))
+    check("no other student is named", all("student" not in x for x in own.get("submissions", [])))
+    check("a student cannot filter across people",
+          student.call("list_cq_submissions", {"flagged": True}).get("_isError") is True)
+
+    panel = other.call("list_cq_submissions", {"limit": 50})
+    check("a teacher lists everyone", panel.get("viewing_as") == "teacher")
+    check("rows name the student", all("student" in x for x in panel.get("submissions", [])))
+    check("status filter narrows",
+          all(x["status"] == "awaiting_teacher" for x in
+              other.call("list_cq_submissions",
+                         {"status": "awaiting_teacher", "limit": 50}).get("submissions", [])))
+    check("unknown status is refused",
+          other.call("list_cq_submissions", {"status": "banana"}).get("_isError") is True)
+
+    print("\n\033[1mteacher edits\033[0m")
+    before = student.call("get_cq_result", {"submission_id": sid})
+    was = {m["part"]: m["awarded"] for m in before.get("marks", [])}
+
+    check("a student may not override a mark",
+          student.call("override_cq_mark",
+                       {"submission_id": sid, "part": "ka", "awarded": 1}).get("_isError") is True)
+    check("a student may not release",
+          student.call("release_cq_marks", {"submission_id": sid}).get("_isError") is True)
+    check("a student may not rewrite feedback",
+          student.call("edit_cq_feedback",
+                       {"submission_id": sid, "feedback": "x"}).get("_isError") is True)
+
+    check("a mark above the part maximum is refused",
+          other.call("override_cq_mark",
+                     {"submission_id": sid, "part": "ka", "awarded": 9}).get("_isError") is True)
+    check("an override that changes nothing is refused",
+          other.call("override_cq_mark",
+                     {"submission_id": sid, "part": "ka"}).get("_isError") is True)
+    check("an unknown part is refused",
+          other.call("override_cq_mark",
+                     {"submission_id": sid, "part": "nga", "awarded": 1}).get("_isError") is True)
+
+    target = 0 if was.get("gha", 0) else 1
+    edited = other.call("override_cq_mark", {
+        "submission_id": sid, "part": "gha", "awarded": target,
+        "reason": "যুক্তি ঠিক আছে, কিন্তু উপসংহার নেই।", "note": "second read"})
+    check("a teacher can change a mark", edited.get("_isError") is False,
+          str(edited.get("error"))[:90])
+    gha = next((m for m in edited.get("marks", []) if m["part"] == "gha"), {})
+    check("the new mark is returned", gha.get("awarded") == target, str(gha.get("awarded")))
+    check("the new reason is returned", "উপসংহার" in (gha.get("reason") or ""))
+    check("the total was recomputed",
+          edited.get("total_awarded") == sum(m["awarded"] for m in edited.get("marks", [])))
+
+    said = other.call("edit_cq_feedback",
+                      {"submission_id": sid, "feedback": "তোমার প্রয়োগ অংশ ভালো হয়েছে।"})
+    check("a teacher can rewrite the feedback", said.get("feedback") == "তোমার প্রয়োগ অংশ ভালো হয়েছে।",
+          str(said.get("feedback"))[:60])
+    check("empty feedback is refused",
+          other.call("edit_cq_feedback",
+                     {"submission_id": sid, "feedback": "   "}).get("_isError") is True)
+
+    print("\n\033[1mcorrecting a misread line\033[0m")
+    lines_before = student.call("get_cq_result", {"submission_id": sid})
+    check("a student may not fix a transcription",
+          student.call("fix_cq_transcription", {
+              "submission_id": sid, "line_index": 0, "text": "x"}).get("_isError") is True)
+    check("a student may not regrade",
+          student.call("regrade_cq_script", {"submission_id": sid}).get("_isError") is True)
+    check("empty replacement text is refused",
+          other.call("fix_cq_transcription", {
+              "submission_id": sid, "line_index": 0, "text": "  "}).get("_isError") is True)
+    check("a negative line index is refused",
+          other.call("fix_cq_transcription", {
+              "submission_id": sid, "line_index": -1, "text": "x"}).get("_isError") is True)
+
+    fixed = other.call("fix_cq_transcription", {
+        "submission_id": sid, "line_index": 0, "text": "ক) ত্বরণ হলো বেগের পরিবর্তনের হার।"})
+    check("a teacher can correct a line", fixed.get("_isError") is False,
+          str(fixed.get("error"))[:90])
+    check("stale marks cannot be released",
+          other.call("release_cq_marks", {"submission_id": sid}).get("_isError") is True)
+
+    again = other.call("regrade_cq_script", {"submission_id": sid})
+    check("marking again succeeds", again.get("_isError") is False, str(again.get("error"))[:90])
+    check("and it is releasable once more", again.get("status") == "awaiting_teacher",
+          str(again.get("status")))
+    check("still four marks after regrading", len(again.get("marks", [])) == 4)
+    check("total still equals the sum",
+          again.get("total_awarded") == sum(m["awarded"] for m in again.get("marks", [])))
+    assert lines_before is not None
+
+    print("\n\033[1mrelease\033[0m")
+    out = other.call("release_cq_marks", {"submission_id": sid})
+    check("a teacher can release", out.get("_isError") is False, str(out.get("error"))[:90])
+    check("released is no longer provisional", out.get("provisional") is False)
+    check("the student sees it as released",
+          student.call("get_cq_result", {"submission_id": sid}).get("status") == "released")
 
     print(f"\n\033[1m{passed} passed, {failed} failed\033[0m\n")
     return 1 if failed else 0

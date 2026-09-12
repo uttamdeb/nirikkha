@@ -46,6 +46,25 @@ claude mcp add --transport http nirikkha https://nirikkha-23594790708.us-central
 }}}
 ```
 
+### ChatGPT, and anything else that will not take a pasted token
+
+Sign in instead — the server is an OAuth 2.1 protected resource and Supabase
+Auth is its authorization server. Add the connector with **Authentication:
+OAuth**, leave the advanced panel empty (the client registers itself), and
+approve the consent screen the app shows you. Nothing to paste.
+
+The discovery chain, if you are debugging it:
+
+```
+GET  {service}/.well-known/oauth-protected-resource   → authorization_servers
+GET  {supabase}/auth/v1/.well-known/oauth-authorization-server
+POST {supabase}/auth/v1/oauth/clients/register        → dynamic registration
+     {service}/oauth/consent?authorization_id=…       → the app's consent screen
+```
+
+A 401 from `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="…"`
+pointing at the first of those.
+
 ## What a CQ is
 
 Four parts against one উদ্দীপক (stimulus), marked independently, totalling 10.
@@ -76,8 +95,19 @@ submission.
 | `mime_type` | enum | `image/jpeg` (default), `image/png`, `image/webp` |
 | `subject` | string | e.g. `পদার্থবিজ্ঞান`, ≤120 chars. Optional, improves marking |
 
-Max 20 MB per page. Base64 is validated strictly — a truncated payload is
-rejected with a message naming the page rather than silently corrupting it.
+Max 20 MB per page and **23 MB across a script** — base64 inflates by a third
+and the platform drops a body over 32 MiB before the service sees it, so the
+smaller total limit is what gives you a real error message. Base64 is validated
+strictly; a truncated payload names the page rather than corrupting silently.
+
+### `list_cq_submissions` — find work
+
+`status`, `limit` (≤50), and for teachers `flagged` and `student`. Read-only.
+
+**This is the only way to find a `submission_id`** other than the call that
+created one. A student sees their own scripts; a teacher sees everyone's, each
+row naming the student. A student passing `flagged` or `student` is refused
+rather than silently narrowed, so a short list never reads as "nothing to do".
 
 ### `clarify_unclear_line` — resolve a line the reader could not read
 
@@ -92,6 +122,35 @@ resolved, marking runs automatically and the response comes back
 ### `get_cq_result` — read status and marks
 
 `submission_id`. Read-only. Owner or teacher only.
+
+### `override_cq_mark` — change a mark, or the words explaining it
+
+Teachers only. `submission_id`, `part` (`ka`/`kha`/`ga`/`gha`), and any of
+`awarded`, `reason`, `improvement`, `note`. Pass what you mean to change; the
+rest is untouched. An override that changes nothing is refused, and so is a
+mark above the part's maximum. The agent's original is kept beside the
+correction and the student is shown who made it. The total is recomputed here.
+
+### `edit_cq_feedback` — rewrite the overall comment
+
+Teachers only. `submission_id`, `feedback`. Same attribution rules.
+
+### `fix_cq_transcription` — correct a misread line
+
+Teachers only. `submission_id`, `line_index`, `text`. For when the reader read
+the handwriting *wrongly*, as opposed to failing to read it. Marks computed from
+the old text go stale and cannot be released until `regrade_cq_script` runs.
+
+### `regrade_cq_script` — mark it again
+
+Teachers only. `submission_id`. Discards the previous marks and any teacher
+rewrites of the marker's wording, because the agent is now speaking about text
+it has not seen before. 10–30 seconds.
+
+### `release_cq_marks` — publish to the student
+
+Teachers only. `submission_id`. Refused when the transcript changed after
+marking. Read the result first: release is where a mistake reaches the student.
 
 ### `get_cq_rubric` — the mark scheme
 

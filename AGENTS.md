@@ -95,8 +95,17 @@ every route resolves the caller and checks ownership or the teacher role before 
 a row. RLS is defence in depth, not the only gate. Caller resolution is cached 30s
 (`AUTH_TTL`), which is why a role change takes up to half a minute to take effect.
 
-MCP tools are a channel to the agent, not a window into the database — four narrow tools,
-no raw query surface. Keep it that way.
+MCP tools are a channel to the agent, not a window into the database — narrow tools, no raw
+query surface. Keep it that way. `list_cq_submissions` is scoped by role in the handler, and
+a student passing a teacher-only filter is refused rather than quietly narrowed, so a short
+list never reads as "nothing to do".
+
+Clients that cannot take a pasted token sign in instead: Supabase Auth is the OAuth
+authorization server, the service serves `/.well-known/oauth-protected-resource` under all
+three paths clients look in, and `/oauth/consent` in the web app is where a person sees who
+is asking and can refuse. Two Supabase settings make that work — `oauth_server_enabled` with
+`oauth_server_authorization_path`, and dynamic registration — and they live in project
+config, not in a migration.
 
 ## Tests
 
@@ -138,3 +147,7 @@ at 32 MiB, which is why uploads are limited to 3 pages and 28 MB in total.
 - Multi-question exams only grade `questions[0]` (same as the upstream classroom app).
 - Telegram-provisioned students use synthetic `tg_{id}@bot.local` accounts; there is no
   web account-linking UI yet.
+- Exams, batches and Telegram are someone else's lane — do not start them here. The direction
+  is that a teacher creates an exam, students answer it, and scoring stays exactly as it is.
+- `jwt_exp` is raised to 24h on the project so a demo token survives the day. Put it back to
+  3600 afterwards; it applies to every session, not just the ones handed out.
