@@ -218,9 +218,11 @@ def main() -> int:
     check("student cannot override",
           c.post(f"{API}/api/submissions/{sid}/override", headers=s_auth,
                  json={"part": "gha", "new_awarded": 4}).status_code == 403)
+    # 400 or 422 depending on whether the schema or the pipeline catches it: the
+    # ceiling is the mark's own max_marks now, which an exam rubric may raise.
     check("override above the part maximum is rejected",
           c.post(f"{API}/api/submissions/{sid}/override", headers=t_auth,
-                 json={"part": "gha", "new_awarded": 9}).status_code == 422)
+                 json={"part": "gha", "new_awarded": 99}).status_code in (400, 422))
     check("override on an unknown part is rejected",
           c.post(f"{API}/api/submissions/{sid}/override", headers=t_auth,
                  json={"part": "xyz", "new_awarded": 1}).status_code == 422)

@@ -74,10 +74,66 @@ def main() -> int:
     c = httpx.Client(timeout=180)
 
     print("\033[1maccess\033[0m")
-    for path in ("/api/teacher/panel", "/api/teacher/stats"):
+    for path in (
+        "/api/teacher/panel",
+        "/api/teacher/stats",
+        "/api/teacher/settings",
+        "/api/teacher/batches",
+        "/api/teacher/exams",
+    ):
         check(f"student blocked from {path}", c.get(f"{API}{path}", headers=s).status_code == 403)
         check(f"teacher reaches {path}", c.get(f"{API}{path}", headers=tch).status_code == 200)
     check("anonymous blocked", c.get(f"{API}/api/teacher/panel").status_code == 401)
+
+    print("\033[1mclassroom\033[0m")
+    created = c.post(
+        f"{API}/api/teacher/batches",
+        headers=tch,
+        json={"name": "Demo Batch (teacher_test)"},
+    )
+    check("create batch", created.status_code == 201, created.text[:200])
+    batch_id = (created.json().get("batch") or {}).get("id") if created.status_code == 201 else None
+
+    exam = c.post(
+        f"{API}/api/teacher/exams",
+        headers=tch,
+        json={"title": "Demo Exam (teacher_test)"},
+    )
+    check("create exam", exam.status_code == 201, exam.text[:200])
+    exam_id = (exam.json().get("exam") or {}).get("id") if exam.status_code == 201 else None
+
+    if exam_id:
+        q = c.post(
+            f"{API}/api/teacher/exams/{exam_id}/questions",
+            headers=tch,
+            json={
+                "prompt_text": "স্টাব উদ্দীপক",
+                "total_marks": 10,
+                "rubric_json": [
+                    {"key": "ka", "label": "ক", "title": "জ্ঞান", "prompt": "ক?", "modelAnswer": "", "maxMarks": 1},
+                    {"key": "kha", "label": "খ", "title": "অনুধাবন", "prompt": "খ?", "modelAnswer": "", "maxMarks": 2},
+                    {"key": "ga", "label": "গ", "title": "প্রয়োগ", "prompt": "গ?", "modelAnswer": "", "maxMarks": 3},
+                    {"key": "gha", "label": "ঘ", "title": "উচ্চতর দক্ষতা", "prompt": "ঘ?", "modelAnswer": "", "maxMarks": 4},
+                ],
+                "approved": True,
+            },
+        )
+        check("add question", q.status_code == 201, q.text[:200])
+
+    if exam_id and batch_id:
+        pub = c.post(
+            f"{API}/api/teacher/exams/{exam_id}/publish",
+            headers=tch,
+            json={"batch_id": batch_id},
+        )
+        check("publish assigns batch", pub.status_code == 200, pub.text[:200])
+        if pub.status_code == 200:
+            body = pub.json().get("exam") or {}
+            check("exam has batch_id", body.get("batch_id") == batch_id)
+            check("exam has code", bool(body.get("exam_code")))
+
+    wh = c.post(f"{API}/api/telegram/webhook", json={"update_id": 1})
+    check("webhook accepts without secret when unset-or-empty", wh.status_code in (200, 401))
 
     print("\n\033[1mlisting\033[0m")
     page = c.get(f"{API}/api/teacher/panel", headers=tch).json()

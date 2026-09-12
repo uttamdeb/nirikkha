@@ -96,9 +96,9 @@ class PartMark(BaseModel):
 
     @model_validator(mode="after")
     def within_range(self) -> PartMark:
-        expected_max = CQ_PARTS[self.part][1]
-        if self.max_marks != expected_max:
-            self.max_marks = expected_max
+        # Prefer an explicit positive max (exam rubric); otherwise the fixed CQ scheme.
+        if self.max_marks <= 0:
+            self.max_marks = CQ_PARTS[self.part][1]
         if not 0 <= self.awarded <= self.max_marks:
             raise ValueError(
                 f"part {self.part}: awarded {self.awarded} outside 0..{self.max_marks}"
@@ -161,9 +161,10 @@ class OverrideMark(BaseModel):
 
     @model_validator(mode="after")
     def sane(self) -> OverrideMark:
-        cap = CQ_PARTS[self.part][1]
-        if self.new_awarded is not None and self.new_awarded > cap:
-            raise ValueError(f"part {self.part} is out of {cap}")
+        # Cap is enforced against the stored mark's max_marks in the pipeline —
+        # exam rubrics may differ from the default 1/2/3/4 scheme.
+        if self.new_awarded is not None and self.new_awarded > 100:
+            raise ValueError(f"part {self.part} is out of range")
         if self.new_awarded is None and self.reason is None and self.improvement is None:
             raise ValueError("nothing to change")
         return self

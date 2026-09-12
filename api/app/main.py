@@ -11,22 +11,22 @@ import asyncio
 import logging
 import mimetypes
 import os
-import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import httpx
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db, pipeline
 from .agents.base import AgentError
 from .agents.ocr import get_ocr_provider
+from .auth import Caller, current_user, load_submission, require_teacher
+from .classroom import router as classroom_router
 from .config import settings
 from .mcp import router as mcp_router
 from .schemas import (
@@ -69,6 +69,7 @@ app.add_middleware(
 )
 
 app.include_router(mcp_router)
+app.include_router(classroom_router)
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_PAGES = 3
@@ -78,100 +79,9 @@ MAX_PAGES = 3
 MAX_TOTAL_UPLOAD_BYTES = 28 * 1024 * 1024
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"}
 
-# Resolving a caller costs two round trips to Supabase — the token check and the
-# profile read. With the service in one region and Supabase in another those
-# dominate request time, and a client polling a submission repeats them every few
-# seconds for the same token. Hold the result briefly.
-#
-# The cost of caching is that a signed-out or role-changed session stays live for
-# up to AUTH_TTL. Thirty seconds is short enough not to matter here and is the
-# difference between a page that feels instant and one that does not.
-AUTH_TTL = 30.0
-AUTH_CACHE_MAX = 512
-_auth_cache: dict[str, tuple[float, Caller]] = {}
 
-
-def _cache_get(token: str) -> Caller | None:
-    hit = _auth_cache.get(token)
-    if hit is None:
-        return None
-    expires, caller = hit
-    if expires < time.monotonic():
-        _auth_cache.pop(token, None)
-        return None
-    return caller
-
-
-def _cache_put(token: str, caller: Caller) -> None:
-    if len(_auth_cache) >= AUTH_CACHE_MAX:
-        now = time.monotonic()
-        for key in [k for k, (exp, _) in _auth_cache.items() if exp < now]:
-            _auth_cache.pop(key, None)
-        if len(_auth_cache) >= AUTH_CACHE_MAX:
-            _auth_cache.clear()
-    _auth_cache[token] = (time.monotonic() + AUTH_TTL, caller)
-
-
-# --------------------------------------------------------------------- auth
-
-class Caller:
-    def __init__(self, user_id: str, email: str | None, role: str) -> None:
-        self.id = user_id
-        self.email = email
-        self.role = role
-
-    @property
-    def is_teacher(self) -> bool:
-        return self.role == "teacher"
-
-
-async def current_user(authorization: str | None = Header(default=None)) -> Caller:
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(401, "Missing bearer token")
-    token = authorization.split(" ", 1)[1].strip()
-
-    cached = _cache_get(token)
-    if cached is not None:
-        return cached
-
-    # Validate against Supabase rather than verifying the signature locally:
-    # one network call, but it honours revocation and needs no shared secret.
-    try:
-        response = await db.client().get(
-            f"{settings.supabase_url}/auth/v1/user",
-            headers={"apikey": settings.supabase_publishable_key or settings.supabase_secret_key,
-                     "Authorization": f"Bearer {token}"},
-        )
-    except httpx.HTTPError as exc:
-        raise HTTPException(503, f"Auth check failed: {exc}") from exc
-
-    if response.status_code != 200:
-        raise HTTPException(401, "Invalid or expired session")
-
-    user = response.json()
-    user_id = user.get("id")
-    if not user_id:
-        raise HTTPException(401, "Invalid session")
-
-    profile = await db.select_one("profiles", params={"id": f"eq.{user_id}", "select": "role,email"})
-    caller = Caller(user_id, user.get("email"), (profile or {}).get("role") or "student")
-    _cache_put(token, caller)
-    return caller
-
-
-async def require_teacher(caller: Caller = Depends(current_user)) -> Caller:
-    if not caller.is_teacher:
-        raise HTTPException(403, "This action is for teachers")
-    return caller
-
-
-async def load_submission(submission_id: str, caller: Caller) -> dict[str, Any]:
-    row = await db.select_one("submissions", params={"id": f"eq.{submission_id}", "select": "*"})
-    if not row:
-        raise HTTPException(404, "Submission not found")
-    if row["student_id"] != caller.id and not caller.is_teacher:
-        raise HTTPException(403, "Not your submission")
-    return row
+# --------------------------------------------------------------------- auth (re-exported for tests / backwards compatibility)
+# Caller, current_user, require_teacher, load_submission live in auth.py
 
 
 # --------------------------------------------------------------------- views
@@ -471,6 +381,8 @@ async def teacher_panel(
     status: str | None = None,
     flagged: bool | None = None,
     q: str | None = None,
+    exam_id: str | None = None,
+    batch_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
     caller: Caller = Depends(require_teacher),
@@ -490,13 +402,27 @@ async def teacher_panel(
         base["status"] = f"eq.{status}"
     if flagged:
         base["needs_human_review"] = "is.true"
+    if exam_id:
+        base["exam_id"] = f"eq.{exam_id}"
+    if batch_id:
+        members = await db.select(
+            "batch_members",
+            params={"batch_id": f"eq.{batch_id}", "select": "id"},
+        )
+        if not members:
+            return PanelPage(rows=[], total=0, matched=0, offset=offset, counts={}, flagged=0)
+        base["batch_member_id"] = f"in.({','.join(m['id'] for m in members)})"
 
     select = ("id,status,subject,question_text,total_awarded,total_max,"
               "needs_human_review,review_reason,marks_stale,created_at,released_at,"
-              "student_id,image_paths")
+              "student_id,image_paths,exam_id,batch_member_id")
 
     counts_raw, students = await asyncio.gather(
-        db.select("submissions", params={"select": "status,needs_human_review", "limit": 5000}),
+        db.select("submissions", params={
+            "select": "status,needs_human_review",
+            **({k: v for k, v in base.items() if k in ("exam_id", "batch_member_id")}),
+            "limit": 5000,
+        }),
         db.select("profiles", params={"select": "id,email,full_name", "limit": 5000}),
     )
     by_id = {s["id"]: StudentBrief(**s) for s in students}
@@ -631,9 +557,34 @@ async def override(
 async def release(submission_id: str, caller: Caller = Depends(require_teacher)) -> dict[str, Any]:
     await load_submission(submission_id, caller)
     try:
-        return await pipeline.release(submission_id, caller.id)
+        result = await pipeline.release(submission_id, caller.id)
+        await pipeline.notify_telegram_release(submission_id)
+        return result
     except AgentError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> JSONResponse:
+    from . import settings_store
+    from .telegram.webhook import handle_update
+
+    org = await settings_store.get_org_settings()
+    expected = org.get("webhook_secret")
+    # Fail closed. This route is public and drives the bot, so a missing secret
+    # has to refuse rather than wave the request through — get_org_settings
+    # always seeds one, so the only way here is a row that lost it.
+    if not expected or x_telegram_bot_api_secret_token != expected:
+        raise HTTPException(401, "Invalid secret")
+    try:
+        update = await request.json()
+        await handle_update(update)
+    except Exception:
+        log.exception("telegram webhook error")
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/submissions/{submission_id}/edit-line")
@@ -717,6 +668,7 @@ async def bulk_release(
                 skipped.append({"id": submission_id, "reason": "not found"})
                 continue
             await pipeline.release(submission_id, caller.id)
+            await pipeline.notify_telegram_release(submission_id)
             released.append(submission_id)
         except AgentError as exc:
             skipped.append({"id": submission_id, "reason": str(exc)})
@@ -755,7 +707,7 @@ if _STATIC and _STATIC.is_dir():
         # error instead of a clear 404. The same goes for /.well-known: clients
         # probe it to discover an OAuth server, and this one has none — a 404
         # says so, where 200 and a page of HTML reads as a broken server.
-        if full_path.startswith(("api/", "mcp", ".well-known/")):
+        if full_path.startswith(("api/", "mcp", ".well-known/", "telegram/")):
             raise HTTPException(404, f"No such endpoint: /{full_path}")
 
         candidate = (_STATIC / full_path).resolve()

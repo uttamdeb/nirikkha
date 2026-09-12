@@ -20,6 +20,35 @@ from .schemas import CQ_PARTS, SubmissionStatus
 log = logging.getLogger("nirikkha.pipeline")
 
 
+async def _effective_threshold() -> float:
+    try:
+        from . import settings_store
+        org = await settings_store.get_org_settings()
+        value = org.get("ocr_confidence_threshold")
+        if value is not None:
+            return float(value)
+    except Exception:
+        pass
+    return settings.legibility_threshold
+
+
+async def _exam_publish_mode(submission: dict[str, Any]) -> str:
+    """Resolve publish mode: exam override → org default → admin."""
+    exam_id = submission.get("exam_id")
+    if exam_id:
+        exam = await db.select_one(
+            "exams", params={"id": f"eq.{exam_id}", "select": "publish_mode"}
+        )
+        if exam and exam.get("publish_mode"):
+            return exam["publish_mode"]
+    try:
+        from . import settings_store
+        org = await settings_store.get_org_settings()
+        return org.get("publish_mode") or "admin"
+    except Exception:
+        return "admin"
+
+
 async def _set_status(
     submission_id: str, status: SubmissionStatus, **fields: Any
 ) -> None:
@@ -100,7 +129,7 @@ async def run_ocr(submission_id: str) -> dict[str, Any]:
             for line in result.lines
         ])
 
-    threshold = settings.legibility_threshold
+    threshold = await _effective_threshold()
     stored = await db.select("ocr_lines", params={
         "submission_id": f"eq.{submission_id}", "select": "*", "order": "line_index.asc",
     })
@@ -132,6 +161,12 @@ async def run_ocr(submission_id: str) -> dict[str, Any]:
 async def run_grading(submission_id: str) -> dict[str, Any]:
     """Stage 2 — mark the transcript. Lands in `awaiting_teacher`, never
     straight to `released`: a human always releases."""
+    from .rubric import (
+        build_exam_question_text,
+        rubric_max_by_part,
+        sum_rubric_marks,
+    )
+
     submission = await db.select_one("submissions", params={"id": f"eq.{submission_id}", "select": "*"})
     if not submission:
         raise AgentError(f"submission {submission_id} not found")
@@ -144,15 +179,43 @@ async def run_grading(submission_id: str) -> dict[str, Any]:
 
     has_text = any((line.get("clarified_text") or line.get("text") or "").strip() for line in lines)
 
+    question_text = submission.get("question_text") or ""
+    part_max = None
+    total_max = sum(m for _, m, _ in CQ_PARTS.values())
+
+    exam_id = submission.get("exam_id")
+    if exam_id:
+        questions = await db.select(
+            "questions",
+            params={
+                "exam_id": f"eq.{exam_id}",
+                "approved": "eq.true",
+                "select": "*",
+                "order": "order.asc",
+                "limit": 1,
+            },
+        )
+        if questions:
+            q = questions[0]
+            rubric = q.get("rubric_json")
+            if isinstance(rubric, list):
+                part_max = rubric_max_by_part(rubric)
+                total_max = int(q.get("total_marks") or sum_rubric_marks(rubric) or total_max)
+                question_text = build_exam_question_text(q.get("prompt_text") or "", rubric)
+            elif q.get("total_marks"):
+                total_max = int(q["total_marks"])
+            if not question_text:
+                question_text = q.get("prompt_text") or ""
+
     try:
         if not has_text:
             # No model call on an empty page — cheaper, and it cannot hallucinate.
-            result = blank_answer_result()
+            result = blank_answer_result(part_max)
             grader_name = "short-circuit:blank"
         else:
             transcript = build_transcript(lines)
             grader = get_grader()
-            result = await grader.grade(submission.get("question_text") or "", transcript)
+            result = await grader.grade(question_text, transcript, part_max=part_max)
             grader_name = f"{grader.name}:{settings.grader_model}"
         # Persisting is inside the try on purpose: a write that fails here used
         # to leave the submission stuck in `grading` with no error recorded and
@@ -186,12 +249,21 @@ async def run_grading(submission_id: str) -> dict[str, Any]:
         await _fail(submission_id, f"Grading failed: {exc}")
         raise
 
+    threshold = await _effective_threshold()
     still_unclear = any(
-        needs_clarification(line, settings.legibility_threshold) for line in lines
+        needs_clarification(line, threshold) for line in lines
     )
     review_reason = (
         "grader_uncertain" if result.grader_uncertain
         else ("low_legibility" if still_unclear else None)
+    )
+
+    publish_mode = await _exam_publish_mode(submission)
+    can_auto = (
+        publish_mode == "auto"
+        and not review_reason
+        and not still_unclear
+        and not result.grader_uncertain
     )
 
     await _set_status(
@@ -201,12 +273,24 @@ async def run_grading(submission_id: str) -> dict[str, Any]:
         feedback_edited_by=None,
         feedback_edited_at=None,
         total_awarded=result.total_awarded,
-        total_max=sum(m for _, m, _ in CQ_PARTS.values()),
+        total_max=total_max,
         feedback=result.feedback,
         grader_model=grader_name,
         needs_human_review=bool(review_reason),
         review_reason=review_reason,
     )
+
+    if can_auto:
+        released = await release(submission_id, teacher_id=None)
+        await notify_telegram_release(submission_id)
+        return {
+            "status": SubmissionStatus.RELEASED.value,
+            "total_awarded": result.total_awarded,
+            "grader": grader_name,
+            "needs_human_review": False,
+            "auto_released": True,
+            **released,
+        }
 
     return {
         "status": SubmissionStatus.AWAITING_TEACHER.value,
@@ -236,9 +320,10 @@ async def clarify_line(submission_id: str, line_index: int, text: str) -> dict[s
     lines = await db.select("ocr_lines", params={
         "submission_id": f"eq.{submission_id}", "select": "*", "order": "line_index.asc",
     })
+    threshold = await _effective_threshold()
     remaining = [
         line["line_index"] for line in lines
-        if needs_clarification(line, settings.legibility_threshold)
+        if needs_clarification(line, threshold)
     ]
     if remaining:
         return {"status": SubmissionStatus.AWAITING_STUDENT.value, "flagged_lines": remaining}
@@ -283,7 +368,7 @@ async def apply_override(
     changes: dict[str, Any] = {}
 
     if new_awarded is not None:
-        cap = CQ_PARTS[part][1]
+        cap = int(current.get("max_marks") or CQ_PARTS[part][1])
         if not 0 <= new_awarded <= cap:
             raise AgentError(f"part {part} is out of {cap}")
         if new_awarded != old:
@@ -354,6 +439,28 @@ async def release(submission_id: str, teacher_id: str | None = None) -> dict[str
         payload["reviewed_at"] = datetime.now(UTC).isoformat()
     await _set_status(submission_id, SubmissionStatus.RELEASED, **payload)
     return {"status": SubmissionStatus.RELEASED.value, "total_awarded": total}
+
+
+async def notify_telegram_release(submission_id: str) -> None:
+    """DM the student when a Telegram-originated script is released."""
+    row = await db.select_one(
+        "submissions", params={"id": f"eq.{submission_id}", "select": "*"}
+    )
+    if not row or not row.get("telegram_chat_id"):
+        return
+    if row.get("status") != SubmissionStatus.RELEASED.value:
+        return
+    try:
+        from .telegram import client as tg
+        total = row.get("total_awarded")
+        max_marks = row.get("total_max") or 10
+        feedback = (row.get("feedback") or "")[:500]
+        await tg.send_message(
+            row["telegram_chat_id"],
+            f"✅ ফলাফল: <b>{total}/{max_marks}</b>\n{feedback}",
+        )
+    except Exception as exc:
+        log.warning("telegram release notify failed: %s", exc)
 
 
 async def edit_line(submission_id: str, line_index: int, text: str) -> dict[str, Any]:

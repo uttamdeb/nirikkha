@@ -268,6 +268,24 @@ def main() -> int:
     check("unknown status is refused",
           other.call("list_cq_submissions", {"status": "banana"}).get("_isError") is True)
 
+    print("\n\033[1mexams\033[0m")
+    default = student.call("get_cq_rubric", {})
+    check("the default scheme totals 10",
+          default.get("total") == 10 and default.get("source") == "default",
+          str(default.get("total")))
+    for_script = student.call("get_cq_rubric", {"submission_id": sid})
+    check("a script's own rubric is returned",
+          for_script.get("total") == sum(p["max_marks"] for p in for_script["parts"]),
+          str(for_script.get("total")))
+    check("every row says where it came from",
+          all(x.get("source") in ("app", "telegram") for x in panel.get("submissions", [])))
+    check("a student cannot filter by exam",
+          student.call("list_cq_submissions", {"exam": "x"}).get("_isError") is True)
+    missing = other.call("list_cq_submissions", {"exam": "no-such-exam-xyz"})
+    check("an unmatched exam says so rather than returning nothing",
+          missing.get("_isError") is True and "no exam matches" in str(missing.get("error")),
+          str(missing.get("error"))[:70])
+
     print("\n\033[1mteacher edits\033[0m")
     before = student.call("get_cq_result", {"submission_id": sid})
     was = {m["part"]: m["awarded"] for m in before.get("marks", [])}
@@ -281,9 +299,12 @@ def main() -> int:
           student.call("edit_cq_feedback",
                        {"submission_id": sid, "feedback": "x"}).get("_isError") is True)
 
-    check("a mark above the part maximum is refused",
+    check("a mark above what the part is marked out of is refused",
           other.call("override_cq_mark",
                      {"submission_id": sid, "part": "ka", "awarded": 9}).get("_isError") is True)
+    check("a negative mark is refused",
+          other.call("override_cq_mark",
+                     {"submission_id": sid, "part": "ka", "awarded": -1}).get("_isError") is True)
     check("an override that changes nothing is refused",
           other.call("override_cq_mark",
                      {"submission_id": sid, "part": "ka"}).get("_isError") is True)

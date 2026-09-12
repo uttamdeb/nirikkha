@@ -232,6 +232,13 @@ TOOLS: list[dict[str, Any]] = [
                     "maxLength": 120,
                     "description": "Match a student by name or email. Teachers only.",
                 },
+                "exam": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": (
+                        "Match an exam by its title or its code (e.g. NK-7QF2). Teachers only."
+                    ),
+                },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
             },
         },
@@ -255,7 +262,11 @@ TOOLS: list[dict[str, Any]] = [
                 "part": {"type": "string", "enum": list(CQ_PARTS),
                          "description": "ka=ক 1, kha=খ 2, ga=গ 3, gha=ঘ 4."},
                 "awarded": {"type": "integer", "minimum": 0,
-                            "description": "New mark. Must not exceed the part's maximum."},
+                            "description": (
+                                "New mark. Must not exceed what this part was marked out "
+                                "of — an exam may set that above the default 1/2/3/4, so "
+                                "read the result or get_cq_rubric first if unsure."
+                            )},
                 "reason": {"type": "string", "maxLength": 2000,
                            "description": "Replaces the marker's explanation for this part."},
                 "improvement": {"type": "string", "maxLength": 2000,
@@ -351,7 +362,19 @@ TOOLS: list[dict[str, Any]] = [
             "marks. Useful for explaining a result, or for checking a question is a well-formed CQ "
             "before submitting a script against it."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "submission_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional. Return the marks actually in force for this script — an "
+                        "exam may set its own maximum for a part. Without it you get the "
+                        "default scheme."
+                    ),
+                },
+            },
+        },
         "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
     },
 ]
@@ -538,7 +561,8 @@ async def _tool_list(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
 
     params: dict[str, Any] = {
         "select": ("id,status,subject,question_text,total_awarded,total_max,"
-                   "needs_human_review,marks_stale,created_at,student_id"),
+                   "needs_human_review,marks_stale,created_at,student_id,exam_id,"
+                   "telegram_chat_id"),
         "order": "created_at.desc",
     }
     status = str(args.get("status") or "all")
@@ -551,11 +575,26 @@ async def _tool_list(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
     # are refused rather than silently ignored, so nobody reads a short list as
     # "nothing to do".
     if not caller.is_teacher:
-        if args.get("student") or args.get("flagged"):
-            raise AgentError("only a teacher can filter by student or flag")
+        if args.get("student") or args.get("flagged") or args.get("exam"):
+            raise AgentError("only a teacher can filter by student, exam or flag")
         params["student_id"] = f"eq.{caller.id}"
     elif args.get("flagged"):
         params["needs_human_review"] = "is.true"
+
+    # An exam is named or coded, not identified by uuid, so resolve it first and
+    # say plainly when nothing matches rather than returning an empty list that
+    # reads as "no submissions yet".
+    wanted_exam = str(args.get("exam") or "").strip()
+    if wanted_exam and caller.is_teacher:
+        exams = await db.select("exams", params={"select": "id,title,exam_code", "limit": 500})
+        hits = [
+            e for e in exams
+            if wanted_exam.lower() in (e.get("title") or "").lower()
+            or wanted_exam.lower() == (e.get("exam_code") or "").lower()
+        ]
+        if not hits:
+            raise AgentError(f"no exam matches {wanted_exam!r}")
+        params["exam_id"] = f"in.({','.join(e['id'] for e in hits)})"
 
     needle = str(args.get("student") or "").strip().lower()
     # Searching spans the whole set and reaches into another table, so fetch
@@ -579,6 +618,15 @@ async def _tool_list(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
             rows = [r for r in rows if matches(r)]
 
     listed = rows[:limit]
+
+    # One query for every exam named on the page, rather than one per row.
+    exams_by_id: dict[str, dict[str, Any]] = {}
+    exam_ids = {r["exam_id"] for r in listed if r.get("exam_id")}
+    if exam_ids:
+        exams_by_id = {e["id"]: e for e in await db.select("exams", params={
+            "id": f"in.({','.join(sorted(exam_ids))})", "select": "id,title,exam_code",
+        })}
+
     out: list[dict[str, Any]] = []
     for row in listed:
         item = {
@@ -590,7 +638,12 @@ async def _tool_list(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
             "needs_teacher_review": bool(row.get("needs_human_review")),
             "marks_stale": bool(row.get("marks_stale")),
             "created_at": row.get("created_at"),
+            # Where it came from, so an answer can say "sent in on Telegram".
+            "source": "telegram" if row.get("telegram_chat_id") else "app",
         }
+        exam = exams_by_id.get(row.get("exam_id") or "")
+        if exam:
+            item["exam"] = {"title": exam.get("title"), "code": exam.get("exam_code")}
         if caller.is_teacher:
             who = people.get(row["student_id"], {})
             item["student"] = who.get("full_name") or who.get("email") or row["student_id"]
@@ -620,9 +673,11 @@ async def _tool_override(args: dict[str, Any], caller: Caller) -> dict[str, Any]
     if awarded is not None:
         if not isinstance(awarded, int) or isinstance(awarded, bool):
             raise AgentError("awarded must be a whole number")
-        ceiling = CQ_PARTS[part][1]
-        if not 0 <= awarded <= ceiling:
-            raise AgentError(f"part {CQ_PARTS[part][0]} is out of {ceiling}")
+        if awarded < 0:
+            raise AgentError("a mark cannot be negative")
+        # The ceiling is whatever this mark was set out of, which an exam rubric
+        # may put above the default 1/2/3/4. apply_override reads the mark and
+        # enforces it; duplicating the number here is how the two drift apart.
 
     reason = (str(args.get("reason")).strip() if args.get("reason") is not None else None)
     improvement = (str(args.get("improvement")).strip()
@@ -677,13 +732,31 @@ async def _tool_release(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
     return await _result_payload(submission_id)
 
 
-async def _tool_rubric(_args: dict[str, Any], _caller: Caller) -> dict[str, Any]:
+async def _tool_rubric(args: dict[str, Any], _caller: Caller) -> dict[str, Any]:
+    parts = [
+        {"part": key, "bangla": bn, "max_marks": marks, "skill": skill}
+        for key, (bn, marks, skill) in CQ_PARTS.items()
+    ]
+    submission_id = str(args.get("submission_id") or "")
+    if not submission_id:
+        return {"total": CQ_TOTAL, "parts": parts, "source": "default"}
+
+    # An exam can weight the parts differently, so the marks already on the
+    # script are the truth for it — not the default scheme.
+    marks = await db.select("marks", params={
+        "submission_id": f"eq.{submission_id}", "select": "part,max_marks",
+    })
+    by_part = {m["part"]: m for m in marks if m["part"] in CQ_PARTS}
+    if not by_part:
+        return {"total": CQ_TOTAL, "parts": parts, "source": "default"}
+    for part in parts:
+        found = by_part.get(part["part"])
+        if found and found.get("max_marks"):
+            part["max_marks"] = int(found["max_marks"])
     return {
-        "total": CQ_TOTAL,
-        "parts": [
-            {"part": key, "bangla": bn, "max_marks": marks, "skill": skill}
-            for key, (bn, marks, skill) in CQ_PARTS.items()
-        ],
+        "total": sum(p["max_marks"] for p in parts),
+        "parts": parts,
+        "source": "exam",
     }
 
 

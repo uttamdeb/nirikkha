@@ -19,6 +19,12 @@ import ResultPage from "./pages/Result";
 import InboxPage from "./pages/Inbox";
 import ReviewPage from "./pages/Review";
 import PanelPageView from "./pages/Panel";
+import SettingsPage from "./pages/Settings";
+import BatchesPage from "./pages/Batches";
+import BatchDetailPage from "./pages/BatchDetail";
+import ExamsPage from "./pages/Exams";
+import ExamNewPage from "./pages/ExamNew";
+import ExamDetailPage from "./pages/ExamDetail";
 import ConsentPage from "./pages/Consent";
 
 function Shell({ session, role }: { session: Session; role: string }) {
@@ -38,6 +44,9 @@ function Shell({ session, role }: { session: Session; role: string }) {
             <NavLink to="/" end>{t("navNew")}</NavLink>
             <NavLink to="/inbox">{t("navMine")}</NavLink>
             {isTeacher && <NavLink to="/panel">{t("navPanel")}</NavLink>}
+            {isTeacher && <NavLink to="/batches">{t("navBatches")}</NavLink>}
+            {isTeacher && <NavLink to="/exams">{t("navExams")}</NavLink>}
+            {isTeacher && <NavLink to="/settings">{t("navSettings")}</NavLink>}
           </nav>
           <div className="spacer" />
           <Toggles />
@@ -69,6 +78,30 @@ function Shell({ session, role }: { session: Session; role: string }) {
           <Route
             path="/review"
             element={isTeacher ? <ReviewPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/settings"
+            element={isTeacher ? <SettingsPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/batches"
+            element={isTeacher ? <BatchesPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/batches/:id"
+            element={isTeacher ? <BatchDetailPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/exams"
+            element={isTeacher ? <ExamsPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/exams/new"
+            element={isTeacher ? <ExamNewPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/exams/:id"
+            element={isTeacher ? <ExamDetailPage /> : <Navigate to="/" replace />}
           />
           <Route path="/oauth/consent" element={<ConsentPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
