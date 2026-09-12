@@ -6,6 +6,8 @@ dist/
 __pycache__/
 *.pyc
 .venv/
+.python312/
+.pydeps/
 .DS_Store
 .uv/
 web/.vite/
