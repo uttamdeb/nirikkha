@@ -106,7 +106,7 @@ def main() -> int:
         "check_cq_script", "clarify_unclear_line", "get_cq_result", "list_cq_submissions",
         "override_cq_mark", "edit_cq_feedback", "release_cq_marks", "get_cq_rubric",
         "fix_cq_transcription", "regrade_cq_script", "list_cq_exams",
-        "list_cq_batches", "create_cq_exam",
+        "list_cq_batches", "create_cq_exam", "publish_cq_exam",
     }
     check("the expected tools, and no others", set(tools) == expected,
           f"extra {set(tools) - expected or '-'}, missing {expected - set(tools) or '-'}")
@@ -343,6 +343,46 @@ def main() -> int:
     check("the new exam is findable by its code",
           other.call("list_cq_submissions",
                      {"exam": made.get("exam_code"), "limit": 1}).get("_isError") is False)
+
+    print("\n\033[1mpublishing\033[0m")
+    code = made.get("exam_code")
+    check("a student cannot publish",
+          student.call("publish_cq_exam", {"exam": code, "batch": "Demo"}).get("_isError") is True)
+    check("an unknown exam is refused",
+          other.call("publish_cq_exam", {"exam": "NK-NOPE", "batch": "Demo"}
+                     ).get("_isError") is True)
+    check("an unknown batch is refused",
+          other.call("publish_cq_exam", {"exam": code, "batch": "no-such-batch-xyz"}
+                     ).get("_isError") is True)
+    ambiguous = other.call("publish_cq_exam", {"exam": code, "batch": "Demo Batch"})
+    check("an ambiguous batch name is refused rather than guessed",
+          ambiguous.get("_isError") is True and "be specific" in str(ambiguous.get("error")),
+          str(ambiguous.get("error"))[:80])
+
+    fresh = other.call("create_cq_exam", {
+        "title": "MCP publish target", "question": {"prompt_text": "উদ্দীপক: পরীক্ষামূলক।"}})
+    named = f"MCP publish batch {fresh['exam_code']}"
+    batch_made = other.call("list_cq_batches", {"limit": 1})
+    check("batches are listable before publishing", batch_made.get("_isError") is False)
+    # A batch with no Telegram group: publishing must still succeed and say so.
+    import httpx as _hx
+    made_batch = _hx.post(f"{API}/api/teacher/batches", timeout=30,
+                          headers={**other.headers}, json={"name": named}).json()
+    out = other.call("publish_cq_exam",
+                     {"exam": fresh["exam_code"], "batch": named})
+    check("a teacher can publish", out.get("_isError") is False, str(out.get("error"))[:90])
+    check("it comes back published", out.get("status") == "published", str(out.get("status")))
+    check("it says whether the group was told",
+          out.get("announced_to_telegram") is False and "no Telegram group" in str(out.get("note")),
+          str(out.get("note"))[:80])
+    check("publishing twice is refused",
+          other.call("publish_cq_exam", {"exam": fresh["exam_code"], "batch": named}
+                     ).get("_isError") is True)
+    check("and it now shows as published in the exam list",
+          any(e["exam_code"] == fresh["exam_code"] and e["status"] == "published"
+              for e in other.call("list_cq_exams", {"status": "published", "limit": 50}
+                                  ).get("exams", [])))
+    assert made_batch is not None
 
     print("\n\033[1mteacher edits\033[0m")
     before = student.call("get_cq_result", {"submission_id": sid})

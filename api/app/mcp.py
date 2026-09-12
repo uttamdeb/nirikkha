@@ -294,10 +294,9 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Teachers only. Create an exam as a **draft**, optionally with its first question "
             "and that question's rubric.\n\n"
-            "It is deliberately not published. Publishing announces the exam to a batch's "
-            "Telegram group, which every student in it sees at once — that is a send, not a "
-            "save, so it stays a deliberate step in the web app. This returns the exam_code "
-            "students will quote once it is published.\n\n"
+            "Creates a draft. Nobody is told until publish_cq_exam sends it to a batch, so "
+            "review the question first and publish as a separate, deliberate step. Returns "
+            "the exam_code students will quote.\n\n"
             "Give `question` when you know what you are setting; the four parts default to the "
             "1/2/3/4 CQ split unless the rubric says otherwise, and each part's maxMarks may "
             "differ from it."
@@ -340,6 +339,34 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["title"],
         },
         "annotations": {"readOnlyHint": False, "idempotentHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "publish_cq_exam",
+        "title": "Publish an exam to a batch",
+        "description": (
+            "Teachers only. Publish a draft exam to a batch — this **announces it in that "
+            "batch's Telegram group**, where every student sees the code at once. It is a "
+            "send, not a save.\n\n"
+            "Name the exam by its code (NK-XXXX) or title, and the batch by name. Tell the "
+            "teacher which exam is going to which group and how many students are in it, and "
+            "get a clear yes, before calling this. An exam already published is refused rather "
+            "than announced twice."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "exam": {
+                    "type": "string", "minLength": 1, "maxLength": 300,
+                    "description": "Exam code (NK-XXXX) or title. From list_cq_exams.",
+                },
+                "batch": {
+                    "type": "string", "minLength": 1, "maxLength": 200,
+                    "description": "Batch name. From list_cq_batches.",
+                },
+            },
+            "required": ["exam", "batch"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": False, "openWorldHint": True},
     },
     {
         "name": "override_cq_mark",
@@ -989,6 +1016,81 @@ async def _tool_create_exam(args: dict[str, Any], caller: Caller) -> dict[str, A
     }
 
 
+def _one(matches: list[dict[str, Any]], what: str, needle: str, label: str) -> dict[str, Any]:
+    """Resolve a name to exactly one row, or say why not.
+
+    An agent works from names, and quietly picking the first of several is how
+    the wrong class gets messaged.
+    """
+    if not matches:
+        raise AgentError(f"no {what} matches {needle!r}")
+    if len(matches) > 1:
+        names = ", ".join(str(m.get(label)) for m in matches[:5])
+        raise AgentError(f"{len(matches)} {what}s match {needle!r} — be specific: {names}")
+    return matches[0]
+
+
+async def _tool_publish_exam(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    from fastapi import HTTPException
+
+    from .classroom import PublishExam, publish_exam
+
+    wanted_exam = str(args.get("exam") or "").strip()
+    wanted_batch = str(args.get("batch") or "").strip()
+    if not wanted_exam or not wanted_batch:
+        raise AgentError("name the exam and the batch to publish it to")
+
+    exams, batches = await asyncio.gather(
+        db.select("exams", params={"select": "id,title,exam_code,status", "limit": 500}),
+        db.select("batches", params={"select": "id,name,telegram_group_id", "limit": 500}),
+    )
+    needle = wanted_exam.lower()
+    exam = _one(
+        [e for e in exams
+         if needle == (e.get("exam_code") or "").lower() or needle in (e.get("title") or "").lower()],
+        "exam", wanted_exam, "title",
+    )
+    if exam["status"] == "published":
+        raise AgentError(
+            f"{exam['title']} ({exam['exam_code']}) is already published — "
+            "publishing again would announce it to the group a second time"
+        )
+    batch = _one(
+        [b for b in batches if wanted_batch.lower() in (b.get("name") or "").lower()],
+        "batch", wanted_batch, "name",
+    )
+
+    try:
+        # The REST handler owns publishing, announcement included, so the two
+        # channels cannot drift on what publishing means.
+        result = await publish_exam(exam["id"], PublishExam(batch_id=batch["id"]), caller)
+    except HTTPException as exc:
+        raise AgentError(str(exc.detail)) from exc
+
+    published = result["exam"]
+    announced = bool(published.get("telegram_message_id"))
+    members = await db.select(
+        "batch_members", params={"batch_id": f"eq.{batch['id']}", "select": "id"}
+    )
+    return {
+        "exam_id": published["id"],
+        "title": published["title"],
+        "exam_code": published["exam_code"],
+        "status": published["status"],
+        "batch": batch["name"],
+        "students_in_batch": len(members),
+        "announced_to_telegram": announced,
+        # Publishing succeeds even when the announcement does not, so say which
+        # happened rather than letting "published" imply the class was told.
+        "note": (
+            "Announced in the batch's Telegram group." if announced else
+            "Published, but not announced — the batch has no Telegram group linked, "
+            "or the send failed. Students can still be given the code by hand."
+        ),
+    }
+
+
 async def _none() -> None:
     """Keeps gather()'s shape fixed when there are no batches to fetch."""
     return None
@@ -1030,6 +1132,7 @@ HANDLERS: dict[str, Handler] = {
     "list_cq_exams": _tool_list_exams,
     "list_cq_batches": _tool_list_batches,
     "create_cq_exam": _tool_create_exam,
+    "publish_cq_exam": _tool_publish_exam,
     "override_cq_mark": _tool_override,
     "edit_cq_feedback": _tool_edit_feedback,
     "fix_cq_transcription": _tool_fix_line,

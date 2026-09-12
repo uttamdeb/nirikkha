@@ -132,9 +132,20 @@ Teachers only. `title`, and optionally `question` (`prompt_text`,
 `probable_answer`, `rubric[]` with per-part `maxMarks`). Returns the
 `exam_code`.
 
-**Creates a draft and stops.** Publishing announces the code to a batch's
-Telegram group — every student sees it at once — so it is a send, not a save,
-and stays a deliberate step in the web app.
+**Creates a draft.** Nobody is told until `publish_cq_exam` sends it, so the
+question can be reviewed first.
+
+### `publish_cq_exam` — announce it to a class
+
+Teachers only. `exam` (code or title), `batch` (name). **This posts in the
+batch's Telegram group** — every student sees the code at once. A send, not a
+save.
+
+Names are resolved to exactly one row; two matches is an error listing them,
+never a guess, because guessing here messages the wrong class. An exam already
+published is refused rather than announced twice. The result says
+`announced_to_telegram` separately from `status`, because publishing succeeds
+even when the group send does not.
 
 ### `clarify_unclear_line` — resolve a line the reader could not read
 
