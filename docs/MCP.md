@@ -120,6 +120,22 @@ released. Reach for it before `list_cq_submissions` when the question is about
 an exam rather than a person. The `exam_code` (`NK-XXXX`) is what students quote
 to the bot and what `list_cq_submissions` takes as `exam`.
 
+### `list_cq_batches` — the classes, and who is in them
+
+Teachers only. `limit` (≤50). Read-only. Each batch with its Telegram group,
+enrolled students, and exams set. A batch with no members usually means nobody
+has messaged the bot yet, not that anything is broken.
+
+### `create_cq_exam` — set a new exam
+
+Teachers only. `title`, and optionally `question` (`prompt_text`,
+`probable_answer`, `rubric[]` with per-part `maxMarks`). Returns the
+`exam_code`.
+
+**Creates a draft and stops.** Publishing announces the code to a batch's
+Telegram group — every student sees it at once — so it is a send, not a save,
+and stays a deliberate step in the web app.
+
 ### `clarify_unclear_line` — resolve a line the reader could not read
 
 `submission_id`, `line_index` (integer ≥0, from an `unclear_lines` entry),

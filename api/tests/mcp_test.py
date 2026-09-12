@@ -106,6 +106,7 @@ def main() -> int:
         "check_cq_script", "clarify_unclear_line", "get_cq_result", "list_cq_submissions",
         "override_cq_mark", "edit_cq_feedback", "release_cq_marks", "get_cq_rubric",
         "fix_cq_transcription", "regrade_cq_script", "list_cq_exams",
+        "list_cq_batches", "create_cq_exam",
     }
     check("the expected tools, and no others", set(tools) == expected,
           f"extra {set(tools) - expected or '-'}, missing {expected - set(tools) or '-'}")
@@ -300,6 +301,48 @@ def main() -> int:
     drafts = other.call("list_cq_exams", {"status": "draft", "limit": 50})
     check("the status filter narrows",
           all(e["status"] == "draft" for e in drafts.get("exams", [])))
+
+    batches = other.call("list_cq_batches", {"limit": 5})
+    check("a teacher can list batches", batches.get("_isError") is False,
+          str(batches.get("error"))[:80])
+    check("each batch counts students and exams",
+          all(isinstance(b.get("students"), int) and isinstance(b.get("exams"), int)
+              for b in batches.get("batches", [])))
+    check("a student cannot list batches",
+          student.call("list_cq_batches", {}).get("_isError") is True)
+
+    print("\n\033[1mcreating an exam\033[0m")
+    check("a student cannot create an exam",
+          student.call("create_cq_exam", {"title": "nope"}).get("_isError") is True)
+    check("an exam needs a title",
+          other.call("create_cq_exam", {"title": "   "}).get("_isError") is True)
+
+    made = other.call("create_cq_exam", {"title": "MCP smoke exam"})
+    check("a teacher can create one", made.get("_isError") is False, str(made.get("error"))[:80])
+    check("it comes back as a draft", made.get("status") == "draft", str(made.get("status")))
+    check("it is not published", made.get("published") is False)
+    check("it has a code students can quote",
+          (made.get("exam_code") or "").startswith("NK-"), str(made.get("exam_code")))
+
+    with_q = other.call("create_cq_exam", {
+        "title": "MCP smoke exam with a question",
+        "question": {
+            "prompt_text": "উদ্দীপক: ৫ কেজি ভরের বস্তুতে ২০ N বল।\nক) ত্বরণ কাকে বলে?",
+            "rubric": [{"key": "ka", "maxMarks": 2}, {"key": "kha", "maxMarks": 3},
+                       {"key": "ga", "maxMarks": 5}, {"key": "gha", "maxMarks": 10}],
+        },
+    })
+    check("a question can be set with it", with_q.get("question") is not None,
+          str(with_q.get("error"))[:80])
+    check("a rubric that is not 1/2/3/4 is kept",
+          (with_q.get("question") or {}).get("total_marks") == 20,
+          str((with_q.get("question") or {}).get("total_marks")))
+    check("a question with no prompt is refused",
+          other.call("create_cq_exam", {"title": "x", "question": {"prompt_text": " "}}
+                     ).get("_isError") is True)
+    check("the new exam is findable by its code",
+          other.call("list_cq_submissions",
+                     {"exam": made.get("exam_code"), "limit": 1}).get("_isError") is False)
 
     print("\n\033[1mteacher edits\033[0m")
     before = student.call("get_cq_result", {"submission_id": sid})

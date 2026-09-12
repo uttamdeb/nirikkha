@@ -271,6 +271,77 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
     },
     {
+        "name": "list_cq_batches",
+        "title": "The batches, and who is in them",
+        "description": (
+            "Teachers only. List batches with the Telegram group each is linked to, how many "
+            "students are enrolled, and how many exams have been set for it.\n\n"
+            "A batch is a class: a Telegram group plus its roster. Students enrol by messaging "
+            "the bot, so a batch with no members usually means nobody has done that yet, not "
+            "that something is broken."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+            },
+        },
+        "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "create_cq_exam",
+        "title": "Set a new exam",
+        "description": (
+            "Teachers only. Create an exam as a **draft**, optionally with its first question "
+            "and that question's rubric.\n\n"
+            "It is deliberately not published. Publishing announces the exam to a batch's "
+            "Telegram group, which every student in it sees at once — that is a send, not a "
+            "save, so it stays a deliberate step in the web app. This returns the exam_code "
+            "students will quote once it is published.\n\n"
+            "Give `question` when you know what you are setting; the four parts default to the "
+            "1/2/3/4 CQ split unless the rubric says otherwise, and each part's maxMarks may "
+            "differ from it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "minLength": 1, "maxLength": 300},
+                "question": {
+                    "type": "object",
+                    "description": "The first question. Omit to create an empty draft.",
+                    "properties": {
+                        "prompt_text": {
+                            "type": "string", "minLength": 1, "maxLength": 20000,
+                            "description": "The উদ্দীপক and the four parts, as a student reads it.",
+                        },
+                        "probable_answer": {"type": "string", "maxLength": 20000},
+                        "rubric": {
+                            "type": "array",
+                            "maxItems": 4,
+                            "description": (
+                                "Per-part marks. Each entry: key (ka/kha/ga/gha), optional "
+                                "prompt, modelAnswer, and maxMarks. Defaults to 1/2/3/4."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "key": {"type": "string", "enum": list(CQ_PARTS)},
+                                    "prompt": {"type": "string", "maxLength": 8000},
+                                    "modelAnswer": {"type": "string", "maxLength": 8000},
+                                    "maxMarks": {"type": "integer", "minimum": 1, "maximum": 100},
+                                },
+                                "required": ["key"],
+                            },
+                        },
+                    },
+                    "required": ["prompt_text"],
+                },
+            },
+            "required": ["title"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": False, "openWorldHint": False},
+    },
+    {
         "name": "override_cq_mark",
         "title": "Change a mark, or the words explaining it",
         "description": (
@@ -820,6 +891,104 @@ async def _tool_list_exams(args: dict[str, Any], caller: Caller) -> dict[str, An
     return {"count": len(out), "more": len(rows) > len(listed), "exams": out}
 
 
+async def _tool_list_batches(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    limit = args.get("limit")
+    limit = 20 if not isinstance(limit, int) or isinstance(limit, bool) else max(1, min(limit, 50))
+
+    rows = await db.select("batches", params={
+        "select": "id,name,telegram_group_id,created_at",
+        "order": "created_at.desc", "limit": limit + 1,
+    })
+    listed = rows[:limit]
+    if not listed:
+        return {"count": 0, "more": False, "batches": []}
+
+    ids = ",".join(b["id"] for b in listed)
+    group_ids = sorted({b["telegram_group_id"] for b in listed if b.get("telegram_group_id")})
+    members, exams, groups = await asyncio.gather(
+        db.select("batch_members", params={"batch_id": f"in.({ids})", "select": "batch_id"}),
+        db.select("exams", params={"batch_id": f"in.({ids})", "select": "batch_id,status"}),
+        db.select("telegram_groups", params={
+            "id": f"in.({','.join(group_ids)})", "select": "id,title",
+        }) if group_ids else _none(),
+    )
+    group_titles = {g["id"]: g["title"] for g in (groups or [])}
+
+    return {
+        "count": len(listed),
+        "more": len(rows) > len(listed),
+        "batches": [
+            {
+                "batch_id": b["id"],
+                "name": b["name"],
+                "telegram_group": group_titles.get(b.get("telegram_group_id") or ""),
+                "students": sum(1 for m in members if m["batch_id"] == b["id"]),
+                "exams": sum(1 for e in exams if e["batch_id"] == b["id"]),
+                "created_at": b.get("created_at"),
+            }
+            for b in listed
+        ],
+    }
+
+
+async def _tool_create_exam(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    from .rubric import generate_exam_code, normalize_rubric, sum_rubric_marks
+
+    title = str(args.get("title") or "").strip()
+    if not title:
+        raise AgentError("an exam needs a title")
+    if len(title) > 300:
+        raise AgentError("that title is too long")
+
+    rows = await db.insert("exams", {
+        "title": title,
+        "exam_code": generate_exam_code(),
+        "status": "draft",
+    })
+    exam = rows[0]
+
+    question = args.get("question")
+    created_question = None
+    if isinstance(question, dict):
+        prompt = str(question.get("prompt_text") or "").strip()
+        if not prompt:
+            raise AgentError("a question needs prompt_text")
+        rubric = normalize_rubric(question.get("rubric"))
+        total = sum_rubric_marks(rubric) or CQ_TOTAL
+        qrows = await db.insert("questions", {
+            "exam_id": exam["id"],
+            "type": "cq",
+            "prompt_text": prompt,
+            "probable_answer": str(question.get("probable_answer") or "") or None,
+            "rubric_json": rubric,
+            "total_marks": total,
+            "source": "manual",
+            "order": 0,
+            "approved": True,
+        })
+        created_question = {
+            "question_id": qrows[0]["id"],
+            "total_marks": total,
+            "parts": [{"key": r["key"], "max_marks": r["maxMarks"]} for r in rubric],
+        }
+
+    return {
+        "exam_id": exam["id"],
+        "title": exam["title"],
+        "exam_code": exam["exam_code"],
+        "status": exam["status"],
+        "question": created_question,
+        # Say what did not happen, so nobody assumes the class has been told.
+        "published": False,
+        "next_step": (
+            "Still a draft — nobody has been told. Publish it to a batch from the web app "
+            "to announce the code to that Telegram group."
+        ),
+    }
+
+
 async def _none() -> None:
     """Keeps gather()'s shape fixed when there are no batches to fetch."""
     return None
@@ -859,6 +1028,8 @@ HANDLERS: dict[str, Handler] = {
     "get_cq_result": _tool_get_result,
     "list_cq_submissions": _tool_list,
     "list_cq_exams": _tool_list_exams,
+    "list_cq_batches": _tool_list_batches,
+    "create_cq_exam": _tool_create_exam,
     "override_cq_mark": _tool_override,
     "edit_cq_feedback": _tool_edit_feedback,
     "fix_cq_transcription": _tool_fix_line,
