@@ -4,6 +4,10 @@ const apiProxy =
   process.env.API_PROXY_URL?.replace(/\/$/, "") || "http://127.0.0.1:8100";
 
 const nextConfig: NextConfig = {
+  // Keep resolution inside web/ (repo sits under a parent folder that also has lockfiles).
+  turbopack: {
+    root: process.cwd(),
+  },
   // Dual-process container: Next on $PORT, FastAPI on 8100.
   async rewrites() {
     return [

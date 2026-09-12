@@ -17,6 +17,7 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { ChevronRightIcon } from "lucide-react";
+import { usePrefs } from "@/lib/i18n";
 
 export function NavMain({
   items,
@@ -32,9 +33,10 @@ export function NavMain({
     }[];
   }[];
 }) {
+  const { t } = usePrefs();
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>Platform</SidebarGroupLabel>
+      <SidebarGroupLabel>{t("navPlatform")}</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => {
           const hasChildren = Boolean(item.items && item.items.length > 0);

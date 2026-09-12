@@ -15,6 +15,15 @@ const STATUS_STYLES: Record<string, string> = {
   clarifying: "border-transparent bg-accent text-accent-foreground",
   draft: "border-transparent bg-muted text-muted-foreground",
   approved: "border-transparent bg-secondary text-secondary-foreground",
+  // Submission pipeline
+  ocr_running: "border-transparent bg-secondary text-secondary-foreground",
+  awaiting_student:
+    "border-transparent bg-[color-mix(in_oklch,var(--status-review),white_75%)] text-[color-mix(in_oklch,var(--status-review),black_35%)]",
+  grading: "border-transparent bg-secondary text-secondary-foreground",
+  awaiting_teacher:
+    "border-transparent bg-[color-mix(in_oklch,var(--status-review),white_75%)] text-[color-mix(in_oklch,var(--status-review),black_35%)]",
+  released:
+    "border-transparent bg-[color-mix(in_oklch,var(--status-graded),white_78%)] text-[color-mix(in_oklch,var(--status-graded),black_30%)]",
 };
 
 const LABELS: Record<string, string> = {

@@ -1,6 +1,8 @@
+"use client";
+
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { Annotation } from "../lib/api";
-import { usePrefs } from "../lib/i18n";
+import type { Annotation } from "@/lib/api";
+import { usePrefs } from "@/lib/i18n";
 
 /**
  * Draw a box on a page of the script and attach a note.

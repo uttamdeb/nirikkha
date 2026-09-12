@@ -1,17 +1,11 @@
-import { usePrefs } from "../lib/i18n";
+"use client";
 
-/**
- * Google's standard Sign in with Google button.
- *
- * Follows Google's branding guidelines: the unmodified four-colour mark, Roboto
- * Medium 14px, 40px minimum height, 4px radius, and the specified light/dark
- * surface and border colours. The mark must not be recoloured or redrawn, so it
- * is inlined here exactly as published rather than restyled to fit the page.
- */
+import { usePrefs } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 function GoogleMark() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden focusable="false">
       <path
         fill="#4285F4"
         d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -32,7 +26,7 @@ function GoogleMark() {
   );
 }
 
-export default function GoogleButton({
+export function GoogleButton({
   onClick,
   disabled,
 }: {
@@ -40,16 +34,21 @@ export default function GoogleButton({
   disabled?: boolean;
 }) {
   const { lang } = usePrefs();
-  // Google supplies the wording; "Sign in with Google" is the approved Bangla-
-  // locale string too, so it is not translated.
   const label = lang === "bn" ? "Google দিয়ে সাইন ইন" : "Sign in with Google";
 
   return (
-    <button type="button" className="gsi" onClick={onClick} disabled={disabled}>
-      <span className="gsi-icon">
-        <GoogleMark />
-      </span>
-      <span className="gsi-label">{label}</span>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex h-10 w-full items-center justify-center gap-3 rounded-lg border border-[#dadce0] bg-white text-sm font-medium text-[#3c4043]",
+        "hover:bg-[#f8f9fa] disabled:opacity-50 dark:border-[#5f6368] dark:bg-[#131314] dark:text-[#e3e3e3] dark:hover:bg-[#1f1f1f]"
+      )}
+      style={{ fontFamily: "Roboto, Arial, sans-serif" }}
+    >
+      <GoogleMark />
+      {label}
     </button>
   );
 }

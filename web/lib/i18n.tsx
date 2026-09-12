@@ -25,10 +25,14 @@ const STRINGS = {
   navMine: { bn: "আমার খাতা", en: "My scripts" },
   navAll: { bn: "সব খাতা", en: "All scripts" },
   navReview: { bn: "রিভিউ", en: "Review" },
-  navPanel: { bn: "শিক্ষক প্যানেল", en: "Teacher panel" },
+  navPanel: { bn: "ড্যাশবোর্ড", en: "Dashboard" },
   navBatches: { bn: "ব্যাচ", en: "Batches" },
   navExams: { bn: "পরীক্ষা", en: "Exams" },
   navSettings: { bn: "সেটিংস", en: "Settings" },
+  navPlatform: { bn: "প্ল্যাটফর্ম", en: "Platform" },
+  allExams: { bn: "সব পরীক্ষা", en: "All exams" },
+  scriptStudio: { bn: "স্ক্রিপ্ট স্টুডিও", en: "Script studio" },
+  hitlSubtitle: { bn: "HITL বাংলা গ্রেডার", en: "HITL Bangla Grader" },
 
   settingsTitle: { bn: "সেটিংস", en: "Settings" },
   settingsLede: {
