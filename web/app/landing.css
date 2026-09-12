@@ -1,0 +1,384 @@
+/* Generated from the landing design. Every rule is scoped under
+   .nk-landing so its generic class names (.band, .in, .btn, .head)
+   cannot reach the dashboard's Tailwind layer. */
+/* ---------------------------------------------------------------- tokens */
+.nk-landing{
+  --grey-00: oklch(0.990 0.002 255);
+  --grey-05: oklch(0.948 0.004 255);
+  --grey-10: oklch(0.906 0.005 255);
+  --grey-20: oklch(0.845 0.006 255);
+  --char:    oklch(0.318 0.005 255);
+  --char-hi: oklch(0.385 0.006 255);
+  --ink:     oklch(0.215 0.008 255);
+  --ink-mid: oklch(0.480 0.008 255);
+  --ink-low: oklch(0.635 0.007 255);
+
+  /* Aurora. The only saturated color on the page, and it never carries text. */
+  --au-1: oklch(0.855 0.075 272);
+  --au-2: oklch(0.890 0.060 058);
+  --au-3: oklch(0.895 0.050 168);
+  --au-4: oklch(0.865 0.062 312);
+  /* Amber marks the one thing the machine will not do: guess. */
+  --flag:    oklch(0.795 0.135 075);
+  --flag-ink:oklch(0.455 0.105 072);
+
+  --sans:"Schibsted Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --bn:"Noto Sans Bengali","Kohinoor Bangla","Nirmala UI",sans-serif;
+
+  --s--1:clamp(0.75rem,0.73rem+0.1vw,0.8rem);
+  --s-0: clamp(0.94rem,0.9rem+0.18vw,1.05rem);
+  --s-1: clamp(1.15rem,1.05rem+0.45vw,1.45rem);
+  --s-2: clamp(1.6rem,1.35rem+1.2vw,2.5rem);
+  --s-3: clamp(2.3rem,1.75rem+2.7vw,4.4rem);
+  --s-4: clamp(2.6rem,1.7rem+4.6vw,6.2rem);
+
+  --pad:clamp(1.15rem,4.5vw,4.5rem);
+  --ease:cubic-bezier(0.16,1,0.3,1);
+}
+.nk-landing *, .nk-landing *::before, .nk-landing *::after{box-sizing:border-box}
+.nk-landing{-webkit-text-size-adjust:100%}
+.nk-landing{
+  margin:0; background:var(--grey-05); color:var(--ink);
+  font-family:var(--sans); font-size:var(--s-0); line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.nk-landing :lang(bn), .nk-landing .bn{font-family:var(--bn)}
+.nk-landing h1, .nk-landing h2, .nk-landing h3{margin:0; font-weight:500; line-height:1.02; letter-spacing:-0.032em}
+.nk-landing p{margin:0}
+.nk-landing a{color:inherit}
+.nk-landing :focus-visible{outline:2px solid var(--flag-ink); outline-offset:3px}
+.nk-landing ::selection{background:var(--au-1)}
+.nk-landing svg{display:block}
+/* micro-label: the page's connective tissue */
+.nk-landing .lab{
+  font-size:var(--s--1); text-transform:uppercase; letter-spacing:0.11em;
+  font-weight:500; color:var(--ink-low);
+}
+/* ----------------------------------------------------------------- bands */
+.nk-landing .band{padding-inline:var(--pad)}
+.nk-landing .band > .in{max-width:78rem; margin-inline:auto; width:100%}
+.nk-landing .b-pale{background:var(--grey-05)}
+.nk-landing .b-white{background:var(--grey-00)}
+.nk-landing .b-dark{background:var(--char); color:var(--grey-00)}
+.nk-landing .b-dark .lab{color:oklch(0.700 0.006 255)}
+/* ------------------------------------------------------------------ hero */
+/* The hero performs the gate rather than describing it: the reader works
+   down the page, stalls on a word it cannot make out, flags it, asks, and
+   resolves. One pass on load, then it rests on the resolved state. */
+.nk-landing .hero{padding:0}
+.nk-landing .hero .in{max-width:none; display:grid; grid-template-columns:minmax(0,0.92fr) minmax(0,1fr)}
+.nk-landing .hero-art{
+  position:relative; overflow:hidden; min-height:clamp(23rem,46vw,34rem);
+  display:grid; place-items:center; padding:clamp(1.5rem,4vw,3.25rem);
+  background:
+    radial-gradient(120% 95% at 12% 8%, var(--au-2) 0%, transparent 62%),
+    radial-gradient(105% 88% at 88% 22%, var(--au-1) 0%, transparent 60%),
+    radial-gradient(120% 100% at 68% 96%, var(--au-3) 0%, transparent 66%),
+    var(--au-4);
+}
+.nk-landing .hero-art .mark{
+  position:absolute; inset:auto -14% -30% auto; width:60%;
+  opacity:.20; color:var(--grey-00);
+}
+/* the script underneath: ruled paper, at an angle, with handwriting on it */
+.nk-landing .paper{
+  position:absolute; width:min(86%,26rem); aspect-ratio:5/4;
+  transform:rotate(-4.2deg) translate(-7%,-9%);
+  background:
+    repeating-linear-gradient(oklch(0.99 0.002 255 / 0) 0 1.55rem,
+      oklch(0.55 0.02 255 / .16) 1.55rem 1.605rem),
+    oklch(0.995 0.002 255 / .72);
+  border-radius:3px;
+  box-shadow:0 1px 2px oklch(0.2 0.01 255/.07), 0 18px 40px oklch(0.2 0.01 255/.11);
+  animation:paper-in .9s var(--ease) both;
+}
+.nk-landing .paper svg{position:absolute; inset:9% 8% auto 8%; width:84%; color:oklch(0.34 0.04 262)}
+.nk-landing .paper .ln{
+  fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round;
+  stroke-linejoin:round; opacity:.72;
+  stroke-dasharray:var(--len) var(--len); stroke-dashoffset:var(--len);
+  animation:write .85s var(--ease) both;
+}
+.nk-landing .paper .ln.s1{--len:210; animation-delay:.42s}
+.nk-landing .paper .ln.s2{--len:230; animation-delay:.72s}
+.nk-landing .paper .ln.s3{--len:196; animation-delay:1.02s}
+.nk-landing .paper .ln.s4{--len:168; animation-delay:1.32s}
+@keyframes write{to{stroke-dashoffset:0}}
+@keyframes paper-in{from{opacity:0; transform:rotate(-7deg) translate(-11%,-4%)}}
+/* the transcript the reader produces from it */
+.nk-landing .spec{
+  position:relative; z-index:2; width:100%; max-width:30.5rem;
+  justify-self:end; align-self:end;
+  transform:translate(clamp(0rem,1.5vw,1.5rem), clamp(0rem,1.5vw,1.25rem));
+  background:oklch(0.990 0.002 255 / 0.95);
+  border-radius:4px; padding:clamp(1rem,3vw,1.5rem);
+  font-family:var(--mono); font-size:var(--s--1); line-height:2.05;
+  overflow-x:auto; overscroll-behavior-x:contain;
+  box-shadow:0 1px 2px oklch(0.2 0.01 255/.07), 0 16px 44px oklch(0.2 0.01 255/.16);
+  animation:card-in .7s var(--ease) both;
+}
+@keyframes card-in{from{opacity:0; transform:translateY(1.25rem)}}
+.nk-landing .spec dl{display:grid; grid-template-columns:auto minmax(0,1fr); gap:0 1rem; margin:0}
+.nk-landing .spec dt{color:var(--ink-low); text-align:right; user-select:none}
+.nk-landing .spec dd{margin:0; color:var(--ink); white-space:nowrap}
+/* reveal is a clip, never a width: no layout work per frame */
+.nk-landing .spec .rd{display:block; clip-path:inset(0 100% 0 0); animation:read .5s var(--ease) both}
+.nk-landing .spec .r1{animation-delay:.85s}
+.nk-landing .spec .r2{animation-delay:1.45s}
+.nk-landing .spec .r3{animation-delay:5.55s}
+@keyframes read{to{clip-path:inset(0 -2% 0 0)}}
+/* the word it cannot make out, in three states, stacked so nothing reflows */
+.nk-landing .w{display:inline-grid; vertical-align:baseline; text-align:center}
+.nk-landing .w > *{grid-area:1/1; white-space:nowrap}
+.nk-landing .w-raw{
+  filter:blur(2.4px); opacity:.85; color:var(--ink-mid); letter-spacing:.06em;
+  animation:raw-out .35s var(--ease) 2.55s both;
+}
+.nk-landing .w-flag{
+  background:var(--flag); color:var(--flag-ink); border-radius:2px;
+  padding:.1em .38em; font-weight:600; opacity:0;
+  animation:flag-in .4s var(--ease) 2.55s both, flag-out .35s var(--ease) 5.15s both;
+}
+.nk-landing .w-ok{
+  color:var(--ink); font-weight:600; opacity:0;
+  animation:ok-in .45s var(--ease) 5.2s both;
+}
+@keyframes raw-out{to{opacity:0; filter:blur(5px)}}
+@keyframes flag-in{from{opacity:0; transform:scale(.9)} to{opacity:1; transform:none}}
+@keyframes flag-out{to{opacity:0; transform:scale(.96)}}
+@keyframes ok-in{from{opacity:0; transform:translateY(.2em)} to{opacity:1; transform:none}}
+.nk-landing .spec .turn{
+  display:flex; gap:.7rem; line-height:1.55; white-space:normal;
+  opacity:0; animation:turn-in .5s var(--ease) both;
+}
+.nk-landing .spec .turn.a{margin-top:1rem; padding-top:1rem; border-top:1px solid var(--grey-10); animation-delay:3.05s}
+.nk-landing .spec .turn.b{margin-top:.45rem; animation-delay:4.25s}
+.nk-landing .spec .turn .who{color:var(--ink-low); flex:none; width:4.1rem}
+.nk-landing .spec .turn.a .what{color:var(--flag-ink)}
+@keyframes turn-in{from{opacity:0; transform:translateY(.5rem)} to{opacity:1; transform:none}}
+/* a running status, so the performance reads as a process */
+.nk-landing .status{
+  position:absolute; z-index:3; top:clamp(1rem,3vw,1.75rem); left:clamp(1rem,3vw,1.75rem);
+  display:inline-grid; font-family:var(--mono); font-size:var(--s--1);
+  background:oklch(0.185 0.01 255 / .88); color:var(--grey-00);
+  border-radius:999px; padding:.42rem .9rem; letter-spacing:.02em;
+}
+.nk-landing .status > span{grid-area:1/1; display:flex; align-items:center; gap:.5rem; white-space:nowrap; opacity:0}
+.nk-landing .status i{width:.42rem; height:.42rem; border-radius:50%; background:currentColor; flex:none}
+.nk-landing .status .s1{animation:st .5s var(--ease) .5s both, st-out .3s linear 2.5s both}
+.nk-landing .status .s2{color:var(--flag); animation:st .4s var(--ease) 2.6s both, st-out .3s linear 5.1s both}
+.nk-landing .status .s3{color:oklch(0.86 0.11 152); animation:st .45s var(--ease) 5.25s both}
+@keyframes st{from{opacity:0; transform:translateY(-.35rem)} to{opacity:1; transform:none}}
+@keyframes st-out{to{opacity:0; transform:translateY(.35rem)}}
+.nk-landing .hero-copy{
+  padding:clamp(2.25rem,5vw,4.75rem) clamp(1.15rem,4.5vw,4.5rem);
+  display:flex; flex-direction:column; justify-content:center; gap:clamp(1.4rem,3vw,2.1rem);
+  background:var(--grey-00);
+}
+.nk-landing .hero-copy h1{font-size:var(--s-3); max-width:16ch}
+.nk-landing .hero-copy h1 .g{position:relative; color:var(--flag-ink); white-space:nowrap}
+.nk-landing .hero-copy h1 .g svg{
+  position:absolute; left:-3%; right:-3%; top:calc(100% - .06em); width:106%; height:.34em;
+  color:var(--flag); overflow:visible;
+}
+.nk-landing .hero-copy h1 .g path{
+  fill:none; stroke:currentColor; stroke-width:7; stroke-linecap:round;
+  stroke-dasharray:240 240; stroke-dashoffset:240;
+  animation:write 1s var(--ease) 1.15s both;
+}
+.nk-landing .hero-copy .lede{font-size:var(--s-1); line-height:1.42; color:var(--ink-mid); max-width:46ch}
+.nk-landing .topline{display:flex; align-items:center; gap:.7rem}
+.nk-landing .topline .wm{font-weight:700; letter-spacing:-0.03em; font-size:var(--s-1)}
+.nk-landing .topline .wm .bn{font-weight:600; color:var(--ink-mid)}
+@media (max-width:56rem){.nk-landing .hero .in{grid-template-columns:1fr}
+.nk-landing .hero-art{min-height:clamp(19rem,66vw,26rem); order:2; place-items:center}
+.nk-landing .paper{width:min(92%,22rem); transform:rotate(-4deg) translate(-4%,-11%)}
+.nk-landing .spec{justify-self:center; align-self:center; transform:translateY(1.5rem)}
+
+}
+@media (prefers-reduced-motion:reduce){.nk-landing .paper, .nk-landing .spec, .nk-landing .spec .rd, .nk-landing .w-raw, .nk-landing .w-flag, .nk-landing .w-ok, .nk-landing .spec .turn, .nk-landing .status > span, .nk-landing .paper .ln, .nk-landing .hero-copy h1 .g path{animation:none}
+.nk-landing .spec .rd{clip-path:none}
+.nk-landing .paper .ln{stroke-dashoffset:0}
+.nk-landing .hero-copy h1 .g path{stroke-dashoffset:0}
+.nk-landing .w-raw, .nk-landing .w-flag{opacity:0}
+.nk-landing .w-ok, .nk-landing .spec .turn{opacity:1}
+.nk-landing .status .s3{opacity:1}
+
+}
+/* ------------------------------------------------------- dark: pipeline */
+.nk-landing .b-dark{padding-block:clamp(3rem,7vw,6rem)}
+.nk-landing .head{
+  display:flex; flex-wrap:wrap; gap:1rem 2rem;
+  align-items:flex-end; justify-content:space-between; margin-bottom:clamp(2.5rem,6vw,4.5rem);
+}
+.nk-landing .head h2{font-size:var(--s-2); max-width:14ch}
+.nk-landing .head .aside{display:flex; flex-direction:column; gap:.85rem; align-items:flex-start}
+.nk-landing .pipe{display:grid; grid-template-columns:minmax(0,1.05fr) minmax(0,0.95fr); gap:clamp(2rem,5vw,4rem); align-items:center}
+@media (max-width:56rem){.nk-landing .pipe{grid-template-columns:1fr}
+}
+.nk-landing .idx{list-style:none; margin:0; padding:0; counter-reset:n}
+.nk-landing .idx li{
+  display:grid; grid-template-columns:2.4rem minmax(0,1fr); gap:0 1rem;
+  padding-block:.52rem; border-bottom:1px solid var(--char-hi);
+  color:oklch(0.660 0.006 255); font-size:var(--s-0);
+}
+.nk-landing .idx li .n{font-size:var(--s--1); letter-spacing:.06em; padding-top:.25em}
+.nk-landing .idx li:last-child{border-bottom:0}
+.nk-landing .idx li.on{
+  color:var(--grey-00); padding-block:1.1rem;
+  grid-template-columns:2.4rem auto minmax(0,1fr);
+}
+.nk-landing .idx li.on .n{color:var(--flag)}
+.nk-landing .idx li.on .arrow{color:var(--flag); font-size:var(--s-1); line-height:1.1}
+.nk-landing .idx li.on .t{font-size:var(--s-1); letter-spacing:-0.02em}
+.nk-landing .idx li.on .t small{
+  display:block; margin-top:.4rem; font-size:var(--s--1); letter-spacing:0;
+  color:oklch(0.740 0.006 255); line-height:1.55; max-width:34ch; font-weight:400;
+}
+.nk-landing .stack{position:relative; display:grid; place-items:center; min-height:clamp(12rem,26vw,20rem)}
+.nk-landing .stack svg{position:absolute; width:min(60%,18rem); color:var(--grey-00)}
+.nk-landing .stack svg:nth-child(1){opacity:.10; transform:translate(-22%,-14%) scale(.92)}
+.nk-landing .stack svg:nth-child(2){opacity:.16; transform:translate(-8%,-4%)}
+.nk-landing .stack svg:nth-child(3){opacity:.30; transform:translate(8%,7%) scale(1.04)}
+.nk-landing .stack svg:nth-child(4){opacity:1; transform:translate(26%,18%) scale(.88)}
+/* --------------------------------------------------------- pale: format */
+.nk-landing .b-pale{padding-block:clamp(3rem,7vw,6rem)}
+.nk-landing .rubric{margin-top:clamp(2rem,4vw,3rem); border-top:1px solid var(--grey-20)}
+.nk-landing .row{
+  display:grid; grid-template-columns:4.5rem 5rem minmax(0,1fr);
+  gap:0 clamp(1rem,3vw,2.5rem); align-items:baseline;
+  padding-block:clamp(1rem,2.4vw,1.5rem); border-bottom:1px solid var(--grey-20);
+}
+.nk-landing .row .p{font-size:var(--s-2); font-weight:500; letter-spacing:-0.03em; line-height:1}
+.nk-landing .row .m{font-family:var(--mono); font-size:var(--s--1); color:var(--flag-ink)}
+.nk-landing .row .d strong{display:block; font-weight:500; font-size:var(--s-1); letter-spacing:-0.02em}
+.nk-landing .row .d p{color:var(--ink-mid); margin-top:.3rem; max-width:52ch}
+.nk-landing .row.sum{border-bottom:0; color:var(--ink-mid)}
+.nk-landing .row.sum .p{font-family:var(--mono); font-size:var(--s-0); font-weight:400}
+@media (max-width:46rem){.nk-landing .row{grid-template-columns:3rem minmax(0,1fr); gap:.15rem .9rem}
+.nk-landing .row .m{grid-column:2; font-size:var(--s--1)}
+.nk-landing .row .d{grid-column:2}
+.nk-landing .row .p{grid-row:span 2}
+
+}
+/* ------------------------------------------------------------ white: FAQ */
+.nk-landing .b-white{padding-block:clamp(3rem,7vw,6rem)}
+.nk-landing .faq{margin-top:clamp(1.8rem,4vw,2.75rem); border-top:1px solid var(--grey-10)}
+.nk-landing details{border-bottom:1px solid var(--grey-10)}
+.nk-landing summary{
+  display:flex; align-items:center; gap:1rem; cursor:pointer; list-style:none;
+  padding-block:clamp(1rem,2.2vw,1.35rem); font-size:var(--s-1); letter-spacing:-0.018em;
+}
+.nk-landing summary::-webkit-details-marker{display:none}
+.nk-landing summary .tog{color:var(--ink-low); font-size:var(--s-0); width:1rem; flex:none; transition:color .2s}
+.nk-landing details[open] summary .tog{color:var(--flag-ink)}
+.nk-landing summary:hover .tog{color:var(--ink)}
+.nk-landing .ans{
+  display:grid; grid-template-rows:1fr; overflow:hidden;
+  margin-bottom:clamp(1rem,2.2vw,1.35rem);
+}
+.nk-landing .ans-in{
+  display:grid; grid-template-columns:minmax(0,0.85fr) minmax(0,1.15fr);
+  gap:clamp(1.5rem,4vw,3rem); padding:clamp(1.35rem,3.5vw,2.25rem);
+  border-radius:4px;
+  background:
+    radial-gradient(110% 120% at 3% 0%, var(--au-2) 0%, transparent 55%),
+    radial-gradient(100% 130% at 97% 100%, var(--au-1) 0%, transparent 58%),
+    radial-gradient(90% 110% at 60% 8%, var(--au-3) 0%, transparent 52%),
+    var(--grey-05);
+}
+.nk-landing .ans-in .claim{font-size:var(--s-1); line-height:1.28; letter-spacing:-0.022em; max-width:18ch; align-self:start}
+.nk-landing .ans-in .detail{color:var(--ink-mid); font-size:var(--s-0)}
+.nk-landing .ans-in .detail p + p{margin-top:.85rem}
+.nk-landing .ans-in code{font-family:var(--mono); font-size:.85em; color:var(--flag-ink)}
+@media (max-width:52rem){.nk-landing .ans-in{grid-template-columns:1fr}
+}
+/* --------------------------------------------------------------- closing */
+.nk-landing .close{
+  padding-block:clamp(3.5rem,8vw,7rem);
+  background:
+    radial-gradient(75% 130% at 4% 6%, var(--au-2) 0%, transparent 55%),
+    radial-gradient(70% 120% at 96% 20%, var(--au-1) 0%, transparent 55%),
+    radial-gradient(85% 140% at 50% 104%, var(--au-3) 0%, transparent 60%),
+    var(--grey-00);
+}
+.nk-landing .close h2{
+  font-size:var(--s-4); text-transform:uppercase; font-weight:600;
+  letter-spacing:-0.038em; line-height:0.94; max-width:15ch;
+}
+.nk-landing .close h2 .a{color:var(--flag-ink)}
+.nk-landing .close .sub{margin-top:clamp(1.5rem,3vw,2rem); color:var(--ink-mid); max-width:44ch; font-size:var(--s-1); line-height:1.4}
+.nk-landing .proof{
+  margin-top:clamp(2.5rem,6vw,4.5rem); display:flex; flex-wrap:wrap;
+  gap:.9rem 2.25rem; align-items:center;
+  background:oklch(0.990 0.002 255 / 0.82); border-radius:3px;
+  padding:.9rem 1.25rem; width:fit-content;
+}
+.nk-landing .proof span{font-family:var(--mono); font-size:var(--s--1); color:var(--ink-mid)}
+.nk-landing .proof b{color:var(--ink); font-weight:500}
+/* ---------------------------------------------------------------- footer */
+.nk-landing footer{background:var(--char); color:var(--grey-00); padding-block:clamp(3rem,6vw,5rem) 2rem}
+.nk-landing .fgrid{display:grid; grid-template-columns:minmax(0,1.4fr) repeat(2,minmax(0,1fr)); gap:clamp(2rem,5vw,4rem)}
+@media (max-width:52rem){.nk-landing .fgrid{grid-template-columns:1fr 1fr}
+}
+@media (max-width:34rem){.nk-landing .fgrid{grid-template-columns:1fr}
+}
+.nk-landing .fcol h3{font-size:var(--s--1); text-transform:uppercase; letter-spacing:.11em; font-weight:500; color:oklch(0.700 0.006 255)}
+.nk-landing .fcol ul{list-style:none; margin:.9rem 0 0; padding:0}
+.nk-landing .fcol li{margin-bottom:.4rem}
+.nk-landing .fcol a, .nk-landing .fcol span{color:oklch(0.860 0.005 255); text-decoration:none; font-size:var(--s-0)}
+.nk-landing .fcol a:hover{color:var(--grey-00)}
+.nk-landing .fcol .grp{margin-top:1.6rem}
+.nk-landing .fsign{
+  display:flex; flex-wrap:wrap; gap:1.5rem 2rem; align-items:flex-end; justify-content:space-between;
+  margin-top:clamp(3rem,7vw,5.5rem); padding-top:1.5rem; border-top:1px solid var(--char-hi);
+}
+.nk-landing .fsign .big{display:flex; align-items:center; gap:.9rem}
+.nk-landing .fsign .big svg{width:2.6rem}
+.nk-landing .fsign .big .t{font-size:var(--s-2); font-weight:700; letter-spacing:-0.035em; line-height:1}
+.nk-landing .fsign .big .t .bn{display:block; font-size:var(--s--1); font-weight:400; letter-spacing:0; color:oklch(0.700 0.006 255); margin-top:.25rem}
+.nk-landing .fsign .meta{font-size:var(--s--1); color:oklch(0.700 0.006 255); line-height:1.9; text-align:right}
+.nk-landing .fsign .meta a{color:oklch(0.860 0.005 255); text-decoration:none}
+@media (max-width:46rem){.nk-landing .fsign .meta{text-align:left}
+}
+
+/* The real mark, in the two places the brand speaks. Sized to sit on the
+   baseline of the wordmark beside it rather than to a fixed box. */
+.nk-landing .logo-sm{ width:26px; height:26px; display:block; flex:0 0 auto; }
+.nk-landing .fsign .logo-lg{ width:clamp(44px,7vw,72px); height:auto; display:block; flex:0 0 auto; }
+
+/* ------------------------------------------------------------ the way in */
+/* Sticky rather than fixed: the hero is tall and the way into the app
+   should not be something you have to scroll back up to find. */
+.nk-landing .nk-topbar{
+  position:sticky; top:0; z-index:50;
+  display:flex; align-items:center; gap:1rem;
+  padding:0.7rem var(--pad);
+  background:color-mix(in oklch, var(--grey-00) 86%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--grey-10);
+}
+.nk-landing .nk-topbar-brand{
+  display:flex; align-items:center; gap:0.55rem;
+  text-decoration:none; color:var(--ink);
+  font-family:var(--sans); font-weight:600; font-size:var(--s-0);
+  letter-spacing:-0.01em;
+}
+.nk-landing .nk-topbar-brand img{ display:block; }
+.nk-landing .nk-topbar-brand [lang="bn"]{ font-family:var(--bn); color:var(--ink-mid); font-weight:500; }
+.nk-landing .nk-topbar-actions{ margin-inline-start:auto; display:flex; align-items:center; gap:0.4rem; }
+.nk-landing .nk-topbar-link,
+.nk-landing .nk-topbar-cta{
+  font-family:var(--sans); font-size:var(--s--1); text-decoration:none;
+  padding:0.5rem 0.9rem; border-radius:999px; white-space:nowrap;
+  transition:background 0.2s var(--ease), color 0.2s var(--ease);
+}
+.nk-landing .nk-topbar-link{ color:var(--ink-mid); }
+.nk-landing .nk-topbar-link:hover{ background:var(--grey-05); color:var(--ink); }
+.nk-landing .nk-topbar-cta{ background:var(--ink); color:var(--grey-00); font-weight:500; }
+.nk-landing .nk-topbar-cta:hover{ background:var(--char); }
+@media (max-width:34rem){
+  .nk-landing .nk-topbar-brand span{ display:none; }
+  .nk-landing .nk-topbar-link{ display:none; }
+}

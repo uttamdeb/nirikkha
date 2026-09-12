@@ -3,7 +3,6 @@ import { Noto_Sans_Bengali, Sora, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import { cn } from "@/lib/utils";
-import { Providers } from "@/components/providers";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -58,7 +57,10 @@ export default function RootLayout({
       )}
     >
       <body className="flex min-h-full flex-col">
-        <Providers>{children}</Providers>
+        {/* Providers boots the app: it fetches /api/config and blocks on it.
+            The public page must render without that, so the gate lives in the
+            subtrees that need a session rather than at the root. */}
+        {children}
       </body>
     </html>
   );
