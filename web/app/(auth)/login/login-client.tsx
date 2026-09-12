@@ -10,6 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/api";
+import {
+  oauthRedirectTo,
+  rememberAuthNext,
+  safeNextPath,
+  takeAuthNext,
+} from "@/lib/auth-redirect";
 import { usePrefs } from "@/lib/i18n";
 import { LanguagesIcon, MoonIcon, SunIcon } from "lucide-react";
 
@@ -20,7 +26,7 @@ export default function LoginPage() {
   const { session, ready } = useAuth();
   const router = useRouter();
   const search = useSearchParams();
-  const next = search.get("next") || "/";
+  const next = safeNextPath(search.get("next"), "/");
 
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
@@ -30,7 +36,10 @@ export default function LoginPage() {
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    if (ready && session) router.replace(next);
+    if (!ready || !session) return;
+    // sessionStorage covers the case where Supabase strips ?next= from redirectTo.
+    const dest = takeAuthNext(next);
+    router.replace(dest);
   }, [ready, session, router, next]);
 
   async function submit(event: FormEvent) {
@@ -58,13 +67,13 @@ export default function LoginPage() {
 
   async function google() {
     setError("");
+    // Always return to /login on this origin. Sending /?next=… made Supabase
+    // reject the redirect and fall back to the project Site URL (production).
+    rememberAuthNext(next);
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo:
-          window.location.origin +
-          (next.startsWith("/") ? next : "/") +
-          window.location.search,
+        redirectTo: `${oauthRedirectTo()}?next=${encodeURIComponent(next)}`,
       },
     });
     if (authError) setError(authError.message);
