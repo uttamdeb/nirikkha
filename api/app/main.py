@@ -752,8 +752,10 @@ if _STATIC and _STATIC.is_dir():
         """Serve the single-page app, letting client-side routing own the path."""
         # An unknown /api or /mcp path is a client bug, not a page. Falling
         # through to index.html would hand it HTML and a confusing JSON parse
-        # error instead of a clear 404.
-        if full_path.startswith(("api/", "mcp")):
+        # error instead of a clear 404. The same goes for /.well-known: clients
+        # probe it to discover an OAuth server, and this one has none — a 404
+        # says so, where 200 and a page of HTML reads as a broken server.
+        if full_path.startswith(("api/", "mcp", ".well-known/")):
             raise HTTPException(404, f"No such endpoint: /{full_path}")
 
         candidate = (_STATIC / full_path).resolve()
