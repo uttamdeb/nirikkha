@@ -1,0 +1,476 @@
+"""MCP server — the marking agent, reachable from any MCP client.
+
+Streamable HTTP transport, JSON-RPC 2.0, implemented directly so the service
+carries no extra dependency for it.
+
+Design rule: the tools are a channel to the agent, not a window into the
+database. A connected client can submit a script, read back its own marks, and
+resolve a line the reader could not make out. It cannot enumerate other people's
+submissions or reach the tables underneath — authorisation is the same check the
+REST surface makes, on the same Supabase token.
+
+Point a client at:  POST {service}/mcp   with  Authorization: Bearer <token>
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import binascii
+import json
+import logging
+import uuid
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from fastapi import APIRouter, Header, Request
+from fastapi.responses import JSONResponse
+
+from . import db, pipeline
+from .agents.base import AgentError
+from .agents.ocr import UnreadableScript
+from .config import settings
+from .schemas import CQ_PARTS, CQ_TOTAL, SubmissionStatus
+
+log = logging.getLogger("nirikkha.mcp")
+
+router = APIRouter()
+
+PROTOCOL_VERSION = "2025-06-18"
+SERVER_NAME = "nirikkha"
+SERVER_VERSION = "0.1.0"
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_PAGES = 3
+
+INSTRUCTIONS = (
+    "Nirikkha marks handwritten Bangladeshi SSC/HSC সৃজনশীল প্রশ্ন (creative question) "
+    "answer scripts. A CQ has four parts — ক (1 mark, knowledge), খ (2, comprehension), "
+    "গ (3, application), ঘ (4, higher-order skill) — totalling 10.\n\n"
+    "The distinctive behaviour: when the reader cannot make out a word it does NOT guess. "
+    "It returns those lines with [[অস্পষ্ট]] marking the exact unreadable spans and asks "
+    "for them to be resolved before marking. If check_cq_script comes back with status "
+    "'awaiting_student', show the user those lines, ask what they actually say, and send "
+    "each answer with clarify_unclear_line. Marking resumes automatically once the last "
+    "one is resolved.\n\n"
+    "Marks are never final until a teacher releases them; a result with status "
+    "'awaiting_teacher' is provisional and should be described that way."
+)
+
+Handler = Callable[[dict[str, Any], str], Awaitable[dict[str, Any]]]
+
+# --------------------------------------------------------------------- tools
+
+TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "check_cq_script",
+        "title": "Mark a CQ answer script",
+        "description": (
+            "Submit a photo of a handwritten সৃজনশীল প্রশ্ন answer script together with the "
+            "question it answers, and get per-part marks out of 10.\n\n"
+            "Pass the image as base64 in `script_base64`. Supplying `question_text` — the "
+            "উদ্দীপক and all four parts — lets the marker judge whether the student engaged "
+            "with the stimulus, so include it when you have it. Omit it when the page itself "
+            "carries the question; the marker will recover it from the script.\n\n"
+            "Returns one of three outcomes in `status`:\n"
+            "• 'awaiting_teacher' — marked. `marks` holds per-part awards, the reason for each, "
+            "and `improvement` saying what the student should have written.\n"
+            "• 'awaiting_student' — some lines could not be read. `unclear_lines` lists them with "
+            "[[অস্পষ্ট]] marking the exact spans. Ask the user what those say, then call "
+            "clarify_unclear_line for each.\n"
+            "• 'failed' with `unreadable` true — the page is rotated, blurred, or is not an answer "
+            "script. `message` is a Bangla explanation written for the student; relay it.\n\n"
+            "Marking takes 20–60 seconds. Do not call this twice for the same script."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question_text": {
+                    "type": "string",
+                    "maxLength": 20000,
+                    "description": (
+                        "The full question: উদ্দীপক plus parts ক, খ, গ, ঘ. Optional — omit it "
+                        "when the photographed page already carries the question, and the "
+                        "marker will recover it from the script."
+                    ),
+                },
+                "script_base64": {
+                    "type": "string",
+                    "description": (
+                        "The answer script image, base64-encoded. JPEG, PNG or WebP, under 20 MB. "
+                        "For a script running to several sheets use `pages_base64` instead."
+                    ),
+                },
+                "pages_base64": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 3,
+                    "description": (
+                        f"Up to {MAX_PAGES} pages of one script, base64-encoded, in reading "
+                        "order. Use this rather than calling the tool once per page — the "
+                        "marker reads them together so line numbers stay continuous and an "
+                        "answer running over a page break is marked as one answer."
+                    ),
+                },
+                "mime_type": {
+                    "type": "string",
+                    "enum": ["image/jpeg", "image/png", "image/webp"],
+                    "default": "image/jpeg",
+                    "description": "Media type of script_base64.",
+                },
+                "subject": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Subject, e.g. পদার্থবিজ্ঞান. Optional but improves marking.",
+                },
+            },
+            "required": ["script_base64"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": False, "openWorldHint": True},
+    },
+    {
+        "name": "clarify_unclear_line",
+        "title": "Resolve a line the reader could not make out",
+        "description": (
+            "Tell the marker what an unreadable line actually says. Use the `index` from an "
+            "`unclear_lines` entry returned by check_cq_script or get_cq_result.\n\n"
+            "Send the line's true text, not a correction of the student's work — the point is to "
+            "recover what was written, mistakes included, because those mistakes are what gets "
+            "marked.\n\n"
+            "When the last unclear line is resolved, marking runs automatically and this returns "
+            "status 'awaiting_teacher' with the marks."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "submission_id": {"type": "string", "description": "From check_cq_script."},
+                "line_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Which line, from an unclear_lines entry.",
+                },
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "What that line actually says, transcribed as written.",
+                },
+            },
+            "required": ["submission_id", "line_index", "text"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "get_cq_result",
+        "title": "Read a script's marks and status",
+        "description": (
+            "Fetch the current state of a submission: status, per-part marks with reasons and "
+            "improvement guidance, overall feedback, and any lines still waiting to be resolved.\n\n"
+            "Only the submission's own owner, or a teacher, can read it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "submission_id": {"type": "string", "description": "From check_cq_script."},
+            },
+            "required": ["submission_id"],
+        },
+        "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "get_cq_rubric",
+        "title": "The CQ mark scheme",
+        "description": (
+            "Return the four CQ parts, their Bangla labels, the skill each tests and its maximum "
+            "marks. Useful for explaining a result, or for checking a question is a well-formed CQ "
+            "before submitting a script against it."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    },
+]
+
+
+# --------------------------------------------------------------------- helpers
+
+def _unclear_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    threshold = settings.legibility_threshold
+    return [
+        {
+            "index": line["line_index"],
+            "text_as_read": line.get("text") or "",
+            "legibility": line.get("legibility"),
+        }
+        for line in lines
+        if pipeline.needs_clarification(line, threshold)
+    ]
+
+
+async def _result_payload(
+    submission_id: str, row: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    if row is None:
+        row = await db.select_one(
+            "submissions", params={"id": f"eq.{submission_id}", "select": "*"}
+        )
+    if not row:
+        raise AgentError("submission not found")
+
+    # Independent reads; one round trip rather than two.
+    lines, marks = await asyncio.gather(
+        db.select("ocr_lines", params={
+            "submission_id": f"eq.{submission_id}", "select": "*", "order": "line_index.asc",
+        }),
+        db.select("marks", params={"submission_id": f"eq.{submission_id}", "select": "*"}),
+    )
+    order = list(CQ_PARTS)
+    marks.sort(key=lambda m: order.index(m["part"]) if m["part"] in order else 99)
+
+    payload: dict[str, Any] = {
+        "submission_id": submission_id,
+        "status": row["status"],
+        "total_awarded": row.get("total_awarded"),
+        "total_max": row.get("total_max") or CQ_TOTAL,
+        "feedback": row.get("feedback"),
+        "needs_teacher_review": bool(row.get("needs_human_review")),
+        "provisional": row["status"] != SubmissionStatus.RELEASED.value,
+        "marks": [
+            {
+                "part": m["part"],
+                "bangla": CQ_PARTS[m["part"]][0],
+                "skill": CQ_PARTS[m["part"]][2],
+                "awarded": m["awarded"],
+                "max_marks": m["max_marks"],
+                "reason": m.get("reason") or "",
+                "improvement": m.get("improvement") or "",
+            }
+            for m in marks
+            if m["part"] in CQ_PARTS
+        ],
+    }
+    unclear = _unclear_lines(lines)
+    if unclear:
+        payload["unclear_lines"] = unclear
+    if row.get("error"):
+        payload["message"] = row["error"]
+    return payload
+
+
+async def _authorise(submission_id: str, user_id: str, role: str) -> dict[str, Any]:
+    """Check ownership and return the row, so the caller need not re-read it."""
+    row = await db.select_one(
+        "submissions", params={"id": f"eq.{submission_id}", "select": "*"}
+    )
+    if not row:
+        raise AgentError("submission not found")
+    if row["student_id"] != user_id and role != "teacher":
+        raise AgentError("that submission belongs to someone else")
+    return row
+
+
+# --------------------------------------------------------------------- handlers
+
+async def _tool_check_cq_script(args: dict[str, Any], user_id: str) -> dict[str, Any]:
+    question_text = str(args.get("question_text") or "").strip()
+
+    raw_pages = args.get("pages_base64")
+    if isinstance(raw_pages, list) and raw_pages:
+        encoded = [str(page) for page in raw_pages]
+    elif args.get("script_base64"):
+        encoded = [str(args["script_base64"])]
+    else:
+        raise AgentError("give the script in script_base64, or several pages in pages_base64")
+
+    if len(encoded) > MAX_PAGES:
+        raise AgentError(f"at most {MAX_PAGES} pages per script")
+
+    mime = str(args.get("mime_type") or "image/jpeg")
+    if mime not in {"image/jpeg", "image/png", "image/webp"}:
+        raise AgentError(f"unsupported mime_type {mime!r}")
+    extension = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[mime]
+
+    images: list[bytes] = []
+    for position, blob in enumerate(encoded):
+        try:
+            # validate=True so a truncated or mangled payload fails here with a
+            # clear message rather than producing silently corrupt image bytes.
+            image = base64.b64decode(blob, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise AgentError(f"page {position + 1} is not valid base64: {exc}") from exc
+        if not image:
+            raise AgentError(f"page {position + 1} decoded to an empty file")
+        if len(image) > MAX_IMAGE_BYTES:
+            raise AgentError(f"page {position + 1} is larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+        images.append(image)
+
+    submission_id = str(uuid.uuid4())
+    paths = [
+        f"{user_id}/{submission_id}{'' if i == 0 else f'-{i + 1}'}{extension}"
+        for i in range(len(images))
+    ]
+    try:
+        await asyncio.gather(*(db.upload(p, img, mime) for p, img in zip(paths, images, strict=True)))
+    except Exception as exc:
+        await asyncio.gather(*(db.remove(p) for p in paths), return_exceptions=True)
+        raise AgentError(f"could not store the pages: {exc}") from exc
+
+    await db.insert("submissions", {
+        "id": submission_id,
+        "student_id": user_id,
+        "question_text": question_text,
+        "subject": args.get("subject"),
+        "image_path": paths[0],
+        "image_paths": paths,
+        "status": SubmissionStatus.RECEIVED.value,
+        "total_max": CQ_TOTAL,
+    })
+
+    try:
+        outcome = await pipeline.run_ocr(submission_id)
+    except UnreadableScript as exc:
+        return {"submission_id": submission_id, "status": SubmissionStatus.FAILED.value,
+                "unreadable": True, "reason": exc.reason, "message": str(exc)}
+
+    payload = await _result_payload(submission_id)
+    if outcome.get("unreadable"):
+        payload["unreadable"] = True
+    return payload
+
+
+async def _tool_clarify(args: dict[str, Any], user_id: str) -> dict[str, Any]:
+    submission_id = str(args.get("submission_id") or "")
+    text = str(args.get("text") or "").strip()
+    if not submission_id or not text:
+        raise AgentError("submission_id and text are required")
+    line_index = args.get("line_index")
+    if not isinstance(line_index, int) or isinstance(line_index, bool) or line_index < 0:
+        raise AgentError("line_index must be a non-negative integer")
+
+    await pipeline.clarify_line(submission_id, line_index, text)
+    return await _result_payload(submission_id)
+
+
+async def _tool_get_result(args: dict[str, Any], _user_id: str) -> dict[str, Any]:
+    submission_id = str(args.get("submission_id") or "")
+    if not submission_id:
+        raise AgentError("submission_id is required")
+    return await _result_payload(submission_id)
+
+
+async def _tool_rubric(_args: dict[str, Any], _user_id: str) -> dict[str, Any]:
+    return {
+        "total": CQ_TOTAL,
+        "parts": [
+            {"part": key, "bangla": bn, "max_marks": marks, "skill": skill}
+            for key, (bn, marks, skill) in CQ_PARTS.items()
+        ],
+    }
+
+
+HANDLERS: dict[str, Handler] = {
+    "check_cq_script": _tool_check_cq_script,
+    "clarify_unclear_line": _tool_clarify,
+    "get_cq_result": _tool_get_result,
+    "get_cq_rubric": _tool_rubric,
+}
+
+# Tools that act on an existing submission must prove the caller owns it.
+OWNED: set[str] = {"clarify_unclear_line", "get_cq_result"}
+
+
+# --------------------------------------------------------------------- transport
+
+def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _rpc_ok(request_id: Any, result: dict[str, Any]) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _tool_result(payload: dict[str, Any], *, is_error: bool = False) -> dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, indent=2)}],
+        "structuredContent": payload,
+        "isError": is_error,
+    }
+
+
+@router.post("/mcp")
+async def mcp_endpoint(
+    request: Request, authorization: str | None = Header(default=None)
+) -> JSONResponse:
+    try:
+        body = await request.json()
+    except ValueError:
+        return JSONResponse(_rpc_error(None, -32700, "Parse error"), status_code=400)
+
+    if not isinstance(body, dict):
+        return JSONResponse(_rpc_error(None, -32600, "Invalid Request"), status_code=400)
+
+    method = body.get("method")
+    request_id = body.get("id")
+
+    # Notifications carry no id and expect no body.
+    if request_id is None and isinstance(method, str) and method.startswith("notifications/"):
+        return JSONResponse({}, status_code=202)
+
+    if method == "initialize":
+        return JSONResponse(_rpc_ok(request_id, {
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": SERVER_NAME, "title": "Nirikkha CQ marker",
+                           "version": SERVER_VERSION},
+            "instructions": INSTRUCTIONS,
+        }))
+
+    if method == "ping":
+        return JSONResponse(_rpc_ok(request_id, {}))
+
+    if method == "tools/list":
+        return JSONResponse(_rpc_ok(request_id, {"tools": TOOLS}))
+
+    if method != "tools/call":
+        return JSONResponse(_rpc_error(request_id, -32601, f"Method not found: {method}"))
+
+    # Everything past this point touches user data.
+    from .main import current_user  # imported here to avoid a circular import
+
+    try:
+        caller = await current_user(authorization)
+    except Exception:
+        return JSONResponse(
+            _rpc_error(request_id, -32001,
+                       "Not authenticated. Connect with a Nirikkha account token."),
+            status_code=401,
+        )
+
+    params = body.get("params") or {}
+    name = params.get("name")
+    args = params.get("arguments") or {}
+    if not isinstance(args, dict):
+        return JSONResponse(_rpc_error(request_id, -32602, "arguments must be an object"))
+
+    handler = HANDLERS.get(name)
+    if handler is None:
+        return JSONResponse(_rpc_error(request_id, -32602, f"Unknown tool: {name}"))
+
+    try:
+        if name in OWNED:
+            row = await _authorise(str(args.get("submission_id") or ""), caller.id, caller.role)
+            if name == "get_cq_result":
+                # Already read while authorising; do not read it twice.
+                return JSONResponse(_rpc_ok(request_id, _tool_result(
+                    await _result_payload(row["id"], row)
+                )))
+        payload = await handler(args, caller.id)
+        return JSONResponse(_rpc_ok(request_id, _tool_result(payload)))
+    except AgentError as exc:
+        # A tool-level failure is reported inside the result, not as a protocol
+        # error, so the model can read it and decide what to do next.
+        return JSONResponse(_rpc_ok(request_id, _tool_result({"error": str(exc)}, is_error=True)))
+    except Exception as exc:
+        log.exception("mcp tool %s failed", name)
+        return JSONResponse(
+            _rpc_ok(request_id, _tool_result({"error": f"{type(exc).__name__}: {exc}"},
+                                             is_error=True))
+        )
