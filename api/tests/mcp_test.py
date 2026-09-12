@@ -105,7 +105,7 @@ def main() -> int:
     expected = {
         "check_cq_script", "clarify_unclear_line", "get_cq_result", "list_cq_submissions",
         "override_cq_mark", "edit_cq_feedback", "release_cq_marks", "get_cq_rubric",
-        "fix_cq_transcription", "regrade_cq_script",
+        "fix_cq_transcription", "regrade_cq_script", "list_cq_exams",
     }
     check("the expected tools, and no others", set(tools) == expected,
           f"extra {set(tools) - expected or '-'}, missing {expected - set(tools) or '-'}")
@@ -285,6 +285,21 @@ def main() -> int:
     check("an unmatched exam says so rather than returning nothing",
           missing.get("_isError") is True and "no exam matches" in str(missing.get("error")),
           str(missing.get("error"))[:70])
+
+    exams = other.call("list_cq_exams", {"limit": 5})
+    check("a teacher can list exams", exams.get("_isError") is False, str(exams.get("error"))[:80])
+    check("every exam carries a code and a status",
+          all(e.get("status") and "exam_code" in e for e in exams.get("exams", [])))
+    check("every exam counts its own scripts",
+          all(isinstance(e.get("submissions", {}).get("total"), int)
+              for e in exams.get("exams", [])))
+    check("a student cannot list exams",
+          student.call("list_cq_exams", {}).get("_isError") is True)
+    check("an unknown exam status is refused",
+          other.call("list_cq_exams", {"status": "banana"}).get("_isError") is True)
+    drafts = other.call("list_cq_exams", {"status": "draft", "limit": 50})
+    check("the status filter narrows",
+          all(e["status"] == "draft" for e in drafts.get("exams", [])))
 
     print("\n\033[1mteacher edits\033[0m")
     before = student.call("get_cq_result", {"submission_id": sid})

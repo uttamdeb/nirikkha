@@ -109,6 +109,17 @@ created one. A student sees their own scripts; a teacher sees everyone's, each
 row naming the student. A student passing `flagged` or `student` is refused
 rather than silently narrowed, so a short list never reads as "nothing to do".
 
+### `list_cq_exams` — the exams, and how each is going
+
+Teachers only. `status` (`draft`/`published`/`closed`/`all`), `limit` (≤50).
+Read-only.
+
+Returns each exam's code, status, batch, question and mark counts, and how many
+scripts are in against it — total, awaiting a teacher, awaiting a student, and
+released. Reach for it before `list_cq_submissions` when the question is about
+an exam rather than a person. The `exam_code` (`NK-XXXX`) is what students quote
+to the bot and what `list_cq_submissions` takes as `exam`.
+
 ### `clarify_unclear_line` — resolve a line the reader could not read
 
 `submission_id`, `line_index` (integer ≥0, from an `unclear_lines` entry),
