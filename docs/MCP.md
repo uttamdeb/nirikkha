@@ -46,6 +46,17 @@ claude mcp add --transport http nirikkha https://nirikkha-23594790708.us-central
 }}}
 ```
 
+### ChatGPT — not supported
+
+ChatGPT's custom connectors offer only OAuth, no authentication, or a mix of
+the two. There is no field for a static bearer token, so an account token
+cannot be used there however it is generated. Connecting ChatGPT would mean
+standing up an OAuth authorization server; the project's Supabase has one built
+in (`oauth_server_enabled`, plus dynamic registration) but it is switched off,
+and a consent screen in the web app would have to go with it.
+
+Codex, Claude Code, Claude Desktop and Cursor all take the header as it is.
+
 ## What a CQ is
 
 Four parts against one উদ্দীপক (stimulus), marked independently, totalling 10.

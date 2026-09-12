@@ -43,7 +43,11 @@ export default function AuthPage() {
     setError("");
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      // Back to the page they were on, not the front page: an OAuth consent
+      // link carries an authorization_id in the query that must survive.
+      options: {
+        redirectTo: window.location.origin + window.location.pathname + window.location.search,
+      },
     });
     if (authError) setError(authError.message);
   }

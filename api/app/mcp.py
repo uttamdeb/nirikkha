@@ -21,7 +21,10 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .main import Caller
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
@@ -37,6 +40,9 @@ log = logging.getLogger("nirikkha.mcp")
 router = APIRouter()
 
 PROTOCOL_VERSION = "2025-06-18"
+# Supabase Auth is the authorization server for this endpoint: it issues the
+# tokens, and the app hosts the consent screen it redirects to.
+AUTHORIZATION_SERVER = f"{settings.supabase_url}/auth/v1"
 SERVER_NAME = "nirikkha"
 SERVER_VERSION = "0.1.0"
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -53,10 +59,19 @@ INSTRUCTIONS = (
     "each answer with clarify_unclear_line. Marking resumes automatically once the last "
     "one is resolved.\n\n"
     "Marks are never final until a teacher releases them; a result with status "
-    "'awaiting_teacher' is provisional and should be described that way."
+    "'awaiting_teacher' is provisional and should be described that way.\n\n"
+    "Start with list_cq_submissions when the user asks about existing work — 'has mine been "
+    "marked', 'what is waiting on me', 'which scripts still need releasing'. It is the only "
+    "way to find a submission_id you did not just create. A student sees their own scripts, a "
+    "teacher sees the whole class.\n\n"
+    "A teacher can also work through a script by talking about it: change a part's mark or the "
+    "words explaining it with override_cq_mark, rewrite the overall comment with "
+    "edit_cq_feedback, and publish with release_cq_marks. Read the result before releasing — "
+    "release is the point at which a mistake reaches the student, and it cannot be taken back "
+    "quietly. Say what you are about to change before you change it."
 )
 
-Handler = Callable[[dict[str, Any], str], Awaitable[dict[str, Any]]]
+Handler = Callable[[dict[str, Any], "Caller"], Awaitable[dict[str, Any]]]
 
 # --------------------------------------------------------------------- tools
 
@@ -177,6 +192,111 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
     },
     {
+        "name": "list_cq_submissions",
+        "title": "List scripts and what each is waiting on",
+        "description": (
+            "List answer scripts with their status and marks. A student sees their own; a "
+            "teacher sees everyone's.\n\n"
+            "This is how you find a `submission_id` — nothing else returns one except the call "
+            "that created it. Use it to answer 'what is waiting on me', 'has my script been "
+            "marked yet', or 'which scripts still need releasing'.\n\n"
+            "Filter with `status`: 'awaiting_teacher' is marked and waiting for a teacher to "
+            "release it, 'awaiting_student' is stopped on lines the reader could not make out, "
+            "'released' is final, 'failed' could not be read at all. Teachers can also pass "
+            "`flagged` for the ones the marker itself was unsure about, and `student` to search "
+            "by name or email."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["all", "awaiting_teacher", "awaiting_student", "released",
+                             "failed", "received"],
+                    "default": "all",
+                },
+                "flagged": {
+                    "type": "boolean",
+                    "description": "Only scripts the marker flagged for review. Teachers only.",
+                },
+                "student": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Match a student by name or email. Teachers only.",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+            },
+        },
+        "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "override_cq_mark",
+        "title": "Change a mark, or the words explaining it",
+        "description": (
+            "Teachers only. Change what one part was awarded, and/or rewrite the reason and the "
+            "improvement advice the marker wrote for it.\n\n"
+            "Pass whichever you mean to change — the rest is left alone. The agent's original "
+            "wording and score are kept beside the correction, and the student is shown who "
+            "changed it, so this is a visible correction rather than a quiet rewrite.\n\n"
+            "The total is recomputed here; do not try to set it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "submission_id": {"type": "string"},
+                "part": {"type": "string", "enum": list(CQ_PARTS),
+                         "description": "ka=ক 1, kha=খ 2, ga=গ 3, gha=ঘ 4."},
+                "awarded": {"type": "integer", "minimum": 0,
+                            "description": "New mark. Must not exceed the part's maximum."},
+                "reason": {"type": "string", "maxLength": 2000,
+                           "description": "Replaces the marker's explanation for this part."},
+                "improvement": {"type": "string", "maxLength": 2000,
+                                "description": "Replaces the advice on what to have written."},
+                "note": {"type": "string", "maxLength": 2000,
+                         "description": "Why the change was made. Kept in the audit trail."},
+            },
+            "required": ["submission_id", "part"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "edit_cq_feedback",
+        "title": "Rewrite the overall feedback",
+        "description": (
+            "Teachers only. Replace the marker's overall comment on a script. The agent's own "
+            "wording is kept, and the student sees the teacher's name against the new text.\n\n"
+            "Write it to the student in Bangla, addressing them as তুমি, unless they are clearly "
+            "working in English."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "submission_id": {"type": "string"},
+                "feedback": {"type": "string", "minLength": 1, "maxLength": 4000},
+            },
+            "required": ["submission_id", "feedback"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "release_cq_marks",
+        "title": "Publish a result to the student",
+        "description": (
+            "Teachers only. Make a provisional result final and visible to the student as "
+            "settled.\n\n"
+            "Refused if the transcript changed after marking — the script has to be marked again "
+            "first, because publishing a score computed from text that no longer matches the "
+            "script is the one thing this system must not do. Read the result before releasing "
+            "it; releasing is the point at which a mistake reaches the student."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"submission_id": {"type": "string"}},
+            "required": ["submission_id"],
+        },
+        "annotations": {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
         "name": "get_cq_rubric",
         "title": "The CQ mark scheme",
         "description": (
@@ -269,7 +389,8 @@ async def _authorise(submission_id: str, user_id: str, role: str) -> dict[str, A
 
 # --------------------------------------------------------------------- handlers
 
-async def _tool_check_cq_script(args: dict[str, Any], user_id: str) -> dict[str, Any]:
+async def _tool_check_cq_script(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    user_id = caller.id
     question_text = str(args.get("question_text") or "").strip()
 
     raw_pages = args.get("pages_base64")
@@ -336,7 +457,7 @@ async def _tool_check_cq_script(args: dict[str, Any], user_id: str) -> dict[str,
     return payload
 
 
-async def _tool_clarify(args: dict[str, Any], user_id: str) -> dict[str, Any]:
+async def _tool_clarify(args: dict[str, Any], _caller: Caller) -> dict[str, Any]:
     submission_id = str(args.get("submission_id") or "")
     text = str(args.get("text") or "").strip()
     if not submission_id or not text:
@@ -349,14 +470,135 @@ async def _tool_clarify(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     return await _result_payload(submission_id)
 
 
-async def _tool_get_result(args: dict[str, Any], _user_id: str) -> dict[str, Any]:
+async def _tool_get_result(args: dict[str, Any], _caller: Caller) -> dict[str, Any]:
     submission_id = str(args.get("submission_id") or "")
     if not submission_id:
         raise AgentError("submission_id is required")
     return await _result_payload(submission_id)
 
 
-async def _tool_rubric(_args: dict[str, Any], _user_id: str) -> dict[str, Any]:
+async def _tool_list(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    limit = args.get("limit")
+    limit = 20 if not isinstance(limit, int) or isinstance(limit, bool) else max(1, min(limit, 50))
+
+    params: dict[str, Any] = {
+        "select": ("id,status,subject,question_text,total_awarded,total_max,"
+                   "needs_human_review,marks_stale,created_at,student_id"),
+        "order": "created_at.desc",
+    }
+    status = str(args.get("status") or "all")
+    if status != "all":
+        if status not in {s.value for s in SubmissionStatus}:
+            raise AgentError(f"unknown status {status!r}")
+        params["status"] = f"eq.{status}"
+
+    # A student only ever sees their own; the filters that reach across people
+    # are refused rather than silently ignored, so nobody reads a short list as
+    # "nothing to do".
+    if not caller.is_teacher:
+        if args.get("student") or args.get("flagged"):
+            raise AgentError("only a teacher can filter by student or flag")
+        params["student_id"] = f"eq.{caller.id}"
+    elif args.get("flagged"):
+        params["needs_human_review"] = "is.true"
+
+    needle = str(args.get("student") or "").strip().lower()
+    # Searching spans the whole set and reaches into another table, so fetch
+    # wide and narrow here rather than paging a filtered query.
+    params["limit"] = 1000 if needle else limit
+    rows = await db.select("submissions", params=params)
+
+    people: dict[str, dict[str, Any]] = {}
+    if caller.is_teacher and rows:
+        ids = ",".join(sorted({r["student_id"] for r in rows}))
+        people = {p["id"]: p for p in await db.select("profiles", params={
+            "id": f"in.({ids})", "select": "id,email,full_name",
+        })}
+        if needle:
+            def matches(row: dict[str, Any]) -> bool:
+                who = people.get(row["student_id"], {})
+                hay = " ".join(filter(None, [who.get("full_name"), who.get("email")])).lower()
+                return needle in hay
+            rows = [r for r in rows if matches(r)]
+
+    listed = rows[:limit]
+    out: list[dict[str, Any]] = []
+    for row in listed:
+        item = {
+            "submission_id": row["id"],
+            "status": row["status"],
+            "subject": row.get("subject") or (row.get("question_text") or "").strip()[:60] or None,
+            "total_awarded": row.get("total_awarded"),
+            "total_max": row.get("total_max") or CQ_TOTAL,
+            "needs_teacher_review": bool(row.get("needs_human_review")),
+            "marks_stale": bool(row.get("marks_stale")),
+            "created_at": row.get("created_at"),
+        }
+        if caller.is_teacher:
+            who = people.get(row["student_id"], {})
+            item["student"] = who.get("full_name") or who.get("email") or row["student_id"]
+        out.append(item)
+
+    return {
+        "viewing_as": "teacher" if caller.is_teacher else "student",
+        "count": len(out),
+        "more": len(rows) > len(listed),
+        "submissions": out,
+    }
+
+
+def _require_teacher(caller: Caller) -> None:
+    if not caller.is_teacher:
+        raise AgentError("that is a teacher action")
+
+
+async def _tool_override(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    submission_id = str(args.get("submission_id") or "")
+    part = str(args.get("part") or "")
+    if part not in CQ_PARTS:
+        raise AgentError(f"part must be one of {', '.join(CQ_PARTS)}")
+
+    awarded = args.get("awarded")
+    if awarded is not None:
+        if not isinstance(awarded, int) or isinstance(awarded, bool):
+            raise AgentError("awarded must be a whole number")
+        ceiling = CQ_PARTS[part][1]
+        if not 0 <= awarded <= ceiling:
+            raise AgentError(f"part {CQ_PARTS[part][0]} is out of {ceiling}")
+
+    reason = (str(args.get("reason")).strip() if args.get("reason") is not None else None)
+    improvement = (str(args.get("improvement")).strip()
+                   if args.get("improvement") is not None else None)
+    if awarded is None and not reason and not improvement:
+        raise AgentError("give a new mark, a reason, or an improvement — this changes nothing")
+
+    await pipeline.apply_override(
+        submission_id, caller.id, part,
+        new_awarded=awarded, note=str(args.get("note") or "") or None,
+        reason=reason, improvement=improvement,
+    )
+    return await _result_payload(submission_id)
+
+
+async def _tool_edit_feedback(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    submission_id = str(args.get("submission_id") or "")
+    text = str(args.get("feedback") or "").strip()
+    if not text:
+        raise AgentError("feedback cannot be empty")
+    await pipeline.set_feedback(submission_id, caller.id, text)
+    return await _result_payload(submission_id)
+
+
+async def _tool_release(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    submission_id = str(args.get("submission_id") or "")
+    await pipeline.release(submission_id, caller.id)
+    return await _result_payload(submission_id)
+
+
+async def _tool_rubric(_args: dict[str, Any], _caller: Caller) -> dict[str, Any]:
     return {
         "total": CQ_TOTAL,
         "parts": [
@@ -370,14 +612,65 @@ HANDLERS: dict[str, Handler] = {
     "check_cq_script": _tool_check_cq_script,
     "clarify_unclear_line": _tool_clarify,
     "get_cq_result": _tool_get_result,
+    "list_cq_submissions": _tool_list,
+    "override_cq_mark": _tool_override,
+    "edit_cq_feedback": _tool_edit_feedback,
+    "release_cq_marks": _tool_release,
     "get_cq_rubric": _tool_rubric,
 }
 
 # Tools that act on an existing submission must prove the caller owns it.
-OWNED: set[str] = {"clarify_unclear_line", "get_cq_result"}
+OWNED: set[str] = {
+    "clarify_unclear_line", "get_cq_result",
+    "override_cq_mark", "edit_cq_feedback", "release_cq_marks",
+}
 
 
 # --------------------------------------------------------------------- transport
+
+def _public_base(request: Request) -> str:
+    """The origin a client actually reached us on.
+
+    Cloud Run terminates TLS and forwards plain HTTP, so request.url would say
+    http:// and a client comparing it against the resource identifier it asked
+    for would reject the mismatch.
+    """
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}"
+
+
+def _resource_metadata(request: Request) -> dict[str, Any]:
+    base = _public_base(request)
+    return {
+        "resource": f"{base}/mcp",
+        "authorization_servers": [AUTHORIZATION_SERVER],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": ["openid", "email", "profile"],
+        "resource_name": "Nirikkha CQ marker",
+        "resource_documentation": f"{base}/",
+    }
+
+
+# Clients disagree about where this document lives: the spec appends the
+# resource path to the well-known prefix, older ones ask the bare prefix, and
+# some ask underneath the endpoint itself. All three are the same answer.
+@router.get("/.well-known/oauth-protected-resource")
+@router.get("/.well-known/oauth-protected-resource/mcp")
+@router.get("/mcp/.well-known/oauth-protected-resource")
+async def protected_resource(request: Request) -> JSONResponse:
+    return JSONResponse(_resource_metadata(request))
+
+
+def _unauthenticated(request: Request, request_id: Any, message: str) -> JSONResponse:
+    """401 that says where to go and get a token, per RFC 9728."""
+    metadata = f"{_public_base(request)}/.well-known/oauth-protected-resource"
+    return JSONResponse(
+        _rpc_error(request_id, -32001, message),
+        status_code=401,
+        headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata}"'},
+    )
+
 
 def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
@@ -438,10 +731,9 @@ async def mcp_endpoint(
     try:
         caller = await current_user(authorization)
     except Exception:
-        return JSONResponse(
-            _rpc_error(request_id, -32001,
-                       "Not authenticated. Connect with a Nirikkha account token."),
-            status_code=401,
+        return _unauthenticated(
+            request, request_id,
+            "Not authenticated. Sign in to Nirikkha, or connect with an account token.",
         )
 
     params = body.get("params") or {}
@@ -462,7 +754,7 @@ async def mcp_endpoint(
                 return JSONResponse(_rpc_ok(request_id, _tool_result(
                     await _result_payload(row["id"], row)
                 )))
-        payload = await handler(args, caller.id)
+        payload = await handler(args, caller)
         return JSONResponse(_rpc_ok(request_id, _tool_result(payload)))
     except AgentError as exc:
         # A tool-level failure is reported inside the result, not as a protocol

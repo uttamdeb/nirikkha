@@ -19,6 +19,7 @@ import ResultPage from "./pages/Result";
 import InboxPage from "./pages/Inbox";
 import ReviewPage from "./pages/Review";
 import PanelPageView from "./pages/Panel";
+import ConsentPage from "./pages/Consent";
 
 function Shell({ session, role }: { session: Session; role: string }) {
   const navigate = useNavigate();
@@ -68,6 +69,7 @@ function Shell({ session, role }: { session: Session; role: string }) {
             path="/review"
             element={isTeacher ? <ReviewPage /> : <Navigate to="/" replace />}
           />
+          <Route path="/oauth/consent" element={<ConsentPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
