@@ -71,7 +71,8 @@ INSTRUCTIONS = (
     "Start with list_cq_submissions when the user asks about existing work — 'has mine been "
     "marked', 'what is waiting on me', 'which scripts still need releasing'. It is the only "
     "way to find a submission_id you did not just create. A student sees their own scripts, a "
-    "teacher sees the whole class.\n\n"
+    "teacher sees the whole class. list_cq_exams does the same for exams — use it when "
+    "the question is about an exam rather than a person.\n\n"
     "A teacher can also work through a script by talking about it: change a part's mark or the "
     "words explaining it with override_cq_mark, rewrite the overall comment with "
     "edit_cq_feedback, and publish with release_cq_marks. Read the result before releasing — "
@@ -238,6 +239,31 @@ TOOLS: list[dict[str, Any]] = [
                     "description": (
                         "Match an exam by its title or its code (e.g. NK-7QF2). Teachers only."
                     ),
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+            },
+        },
+        "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "list_cq_exams",
+        "title": "The exams, and how each is going",
+        "description": (
+            "Teachers only. List exams with their code, status, the batch they were set for, "
+            "and how many scripts have come in against each — marked, waiting on a teacher, "
+            "and released.\n\n"
+            "Use this before list_cq_submissions when the question is about an exam rather "
+            "than a person: 'how is the physics test going', 'which exams still have scripts "
+            "to release', 'what have I set this week'. The exam_code it returns (NK-XXXX) is "
+            "what students quote to the bot, and is what list_cq_submissions takes as `exam`."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["all", "draft", "published", "closed"],
+                    "default": "all",
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
             },
@@ -732,6 +758,73 @@ async def _tool_release(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
     return await _result_payload(submission_id)
 
 
+async def _tool_list_exams(args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+    _require_teacher(caller)
+    limit = args.get("limit")
+    limit = 20 if not isinstance(limit, int) or isinstance(limit, bool) else max(1, min(limit, 50))
+
+    params: dict[str, Any] = {
+        "select": "id,title,exam_code,status,batch_id,published_at,created_at",
+        "order": "created_at.desc",
+        "limit": limit + 1,
+    }
+    status = str(args.get("status") or "all")
+    if status != "all":
+        if status not in {"draft", "published", "closed"}:
+            raise AgentError(f"unknown status {status!r}")
+        params["status"] = f"eq.{status}"
+
+    rows = await db.select("exams", params=params)
+    listed = rows[:limit]
+    if not listed:
+        return {"count": 0, "more": False, "exams": []}
+
+    ids = ",".join(e["id"] for e in listed)
+    batch_ids = sorted({e["batch_id"] for e in listed if e.get("batch_id")})
+    # Three independent reads; one round trip rather than three per exam.
+    questions, submissions, batches = await asyncio.gather(
+        db.select("questions", params={"exam_id": f"in.({ids})", "select": "exam_id,total_marks"}),
+        db.select("submissions", params={"exam_id": f"in.({ids})", "select": "exam_id,status"}),
+        db.select("batches", params={"id": f"in.({','.join(batch_ids)})", "select": "id,name"})
+        if batch_ids else _none(),
+    )
+
+    batch_names = {b["id"]: b["name"] for b in (batches or [])}
+    out = []
+    for exam in listed:
+        mine = [s for s in submissions if s["exam_id"] == exam["id"]]
+        qs = [q for q in questions if q["exam_id"] == exam["id"]]
+        out.append({
+            "exam_id": exam["id"],
+            "title": exam["title"],
+            "exam_code": exam.get("exam_code"),
+            "status": exam["status"],
+            "batch": batch_names.get(exam.get("batch_id") or ""),
+            "questions": len(qs),
+            "total_marks": sum(int(q.get("total_marks") or 0) for q in qs),
+            "submissions": {
+                "total": len(mine),
+                # The two a teacher acts on: what needs them, and what is done.
+                "awaiting_teacher": sum(
+                    1 for s in mine if s["status"] == SubmissionStatus.AWAITING_TEACHER.value
+                ),
+                "awaiting_student": sum(
+                    1 for s in mine if s["status"] == SubmissionStatus.AWAITING_STUDENT.value
+                ),
+                "released": sum(
+                    1 for s in mine if s["status"] == SubmissionStatus.RELEASED.value
+                ),
+            },
+            "published_at": exam.get("published_at"),
+        })
+    return {"count": len(out), "more": len(rows) > len(listed), "exams": out}
+
+
+async def _none() -> None:
+    """Keeps gather()'s shape fixed when there are no batches to fetch."""
+    return None
+
+
 async def _tool_rubric(args: dict[str, Any], _caller: Caller) -> dict[str, Any]:
     parts = [
         {"part": key, "bangla": bn, "max_marks": marks, "skill": skill}
@@ -765,6 +858,7 @@ HANDLERS: dict[str, Handler] = {
     "clarify_unclear_line": _tool_clarify,
     "get_cq_result": _tool_get_result,
     "list_cq_submissions": _tool_list,
+    "list_cq_exams": _tool_list_exams,
     "override_cq_mark": _tool_override,
     "edit_cq_feedback": _tool_edit_feedback,
     "fix_cq_transcription": _tool_fix_line,
