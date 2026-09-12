@@ -192,7 +192,7 @@ a:hover { color: var(--blue-hover); }
 }
 
 label { display: block; font-size: 14.5px; font-weight: 600; margin-bottom: 5px; color: var(--muted); }
-input[type="text"], input[type="email"], input[type="password"], textarea, select {
+input[type="text"], input[type="email"], input[type="password"], input[type="number"], textarea, select {
   width: 100%;
   padding: 9px 11px;
   font: inherit;
@@ -203,8 +203,28 @@ input[type="text"], input[type="email"], input[type="password"], textarea, selec
   border-radius: 3px;
 }
 textarea { min-height: 132px; resize: vertical; line-height: 1.56; }
+textarea.bangla, .bangla { font-family: var(--serif), "Noto Serif Bengali", serif; }
 input[type="file"] { font-size: 14px; width: 100%; color: var(--muted); }
 .field { margin-bottom: 16px; }
+
+.exam-details-grid {
+  display: grid;
+  gap: 14px;
+}
+@media (min-width: 720px) {
+  .exam-details-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.rubric-part {
+  border: 1px solid var(--line);
+  background: var(--wash, color-mix(in srgb, var(--ink) 4%, var(--canvas)));
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 4px;
+}
+.rubric-marks {
+  width: 88px !important;
+}
 
 button {
   font: inherit;

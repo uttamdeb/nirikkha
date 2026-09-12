@@ -96,9 +96,9 @@ class PartMark(BaseModel):
 
     @model_validator(mode="after")
     def within_range(self) -> PartMark:
-        expected_max = CQ_PARTS[self.part][1]
-        if self.max_marks != expected_max:
-            self.max_marks = expected_max
+        # Prefer an explicit positive max (exam rubric); otherwise the fixed CQ scheme.
+        if self.max_marks <= 0:
+            self.max_marks = CQ_PARTS[self.part][1]
         if not 0 <= self.awarded <= self.max_marks:
             raise ValueError(
                 f"part {self.part}: awarded {self.awarded} outside 0..{self.max_marks}"

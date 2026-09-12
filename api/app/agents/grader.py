@@ -29,7 +29,13 @@ log = logging.getLogger("nirikkha.grader")
 class GraderProvider(Protocol):
     name: str
 
-    async def grade(self, question_text: str, transcript: str) -> GradeResult: ...
+    async def grade(
+        self,
+        question_text: str,
+        transcript: str,
+        *,
+        part_max: dict[str, int] | None = None,
+    ) -> GradeResult: ...
 
 
 def build_transcript(lines: list[dict[str, Any]]) -> str:
@@ -53,10 +59,16 @@ def transcript_has_unresolved(transcript: str) -> bool:
     return UNCLEAR_TOKEN in transcript or UNCLEAR_LINE in transcript
 
 
-def _coerce(payload: dict[str, Any]) -> GradeResult:
+def _coerce(
+    payload: dict[str, Any],
+    *,
+    part_max: dict[str, int] | None = None,
+) -> GradeResult:
     raw_parts = payload.get("parts")
     if not isinstance(raw_parts, list):
         raise AgentError("grader response missing a 'parts' array")
+
+    caps = part_max or {key: marks for key, (_, marks, _) in CQ_PARTS.items()}
 
     by_key: dict[str, PartMark] = {}
     for item in raw_parts:
@@ -69,7 +81,7 @@ def _coerce(payload: dict[str, Any]) -> GradeResult:
         if key in by_key:
             raise AgentError(f"grader returned part {key!r} twice")
 
-        max_marks = CQ_PARTS[key][1]
+        max_marks = int(caps.get(key, CQ_PARTS[key][1]))
         awarded = as_int(item.get("awarded"), field=f"{key}.awarded")
         if not 0 <= awarded <= max_marks:
             raise AgentError(f"part {key}: awarded {awarded} outside 0..{max_marks}")
@@ -105,13 +117,19 @@ def _coerce(payload: dict[str, Any]) -> GradeResult:
     )
 
 
-def blank_answer_result() -> GradeResult:
+def blank_answer_result(part_max: dict[str, int] | None = None) -> GradeResult:
     """Short-circuit for an empty script — no model call, no hallucinated marks."""
+    caps = part_max or {key: marks for key, (_, marks, _) in CQ_PARTS.items()}
     return GradeResult(
         parts=[
-            PartMark(part=key, max_marks=marks, awarded=0,  # type: ignore[arg-type]
-                     reason="No answer detected for this part.",
-                     improvement="এই অংশটির উত্তর খাতায় পাওয়া যায়নি।", evidence_lines=[])
+            PartMark(
+                part=key,  # type: ignore[arg-type]
+                max_marks=int(caps.get(key, marks)),
+                awarded=0,
+                reason="No answer detected for this part.",
+                improvement="এই অংশটির উত্তর খাতায় পাওয়া যায়নি।",
+                evidence_lines=[],
+            )
             for key, (_, marks, _) in CQ_PARTS.items()
         ],
         feedback="খাতায় কোনো উত্তর পাওয়া যায়নি। ছবিটি স্পষ্ট কি না দেখে আবার পাঠাও।",
@@ -154,7 +172,13 @@ class OpenAIGrader:
             self._client = AsyncOpenAI(api_key=settings.openai_api_key)
         return self._client
 
-    async def grade(self, question_text: str, transcript: str) -> GradeResult:
+    async def grade(
+        self,
+        question_text: str,
+        transcript: str,
+        *,
+        part_max: dict[str, int] | None = None,
+    ) -> GradeResult:
         client = self._get_client()
         user_content = build_grading_input(question_text, transcript)
         messages = [
@@ -190,7 +214,7 @@ class OpenAIGrader:
             return content
 
         raw = await with_retry(call, what=f"grading ({self.model})")
-        return _coerce(parse_json_object(raw, what="Grader"))
+        return _coerce(parse_json_object(raw, what="Grader"), part_max=part_max)
 
 
 # --------------------------------------------------------------------- stub
@@ -201,17 +225,30 @@ class StubGrader:
 
     name = "stub"
 
-    async def grade(self, question_text: str, transcript: str) -> GradeResult:
+    async def grade(
+        self,
+        question_text: str,
+        transcript: str,
+        *,
+        part_max: dict[str, int] | None = None,
+    ) -> GradeResult:
         unclear = transcript_has_unresolved(transcript)
-        awards = {"ka": 1, "kha": 1, "ga": 3, "gha": 2 if not unclear else 1}
+        caps = part_max or {key: marks for key, (_, marks, _) in CQ_PARTS.items()}
+        # Proportional stub awards: full on ka/ga when possible, partial on others.
+        awards = {
+            "ka": int(caps.get("ka", 1)),
+            "kha": max(1, int(caps.get("kha", 2)) // 2),
+            "ga": int(caps.get("ga", 3)),
+            "gha": max(1, (int(caps.get("gha", 4)) // 2) if not unclear else 1),
+        }
         return GradeResult(
             parts=[
                 PartMark(
                     part=key,  # type: ignore[arg-type]
-                    max_marks=marks,
-                    awarded=awards[key],
+                    max_marks=int(caps.get(key, marks)),
+                    awarded=min(awards[key], int(caps.get(key, marks))),
                     reason=f"Stub grader: {CQ_PARTS[key][2]} assessed from the transcript.",
-                    improvement=("" if awards[key] == marks
+                    improvement=("" if awards[key] >= int(caps.get(key, marks))
                                  else "স্টাব গাইডেন্স: যুক্তি ও একক স্পষ্ট করে লেখো।"),
                     evidence_lines=[i],
                 )
