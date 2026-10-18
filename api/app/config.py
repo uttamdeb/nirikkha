@@ -62,13 +62,16 @@ class Settings:
 
     # Grading
     grader_provider: str = field(default_factory=lambda: _env("GRADER_PROVIDER", "stub").lower())
-    grader_model: str = field(default_factory=lambda: _env("GRADER_MODEL", "gpt-5.6-luna"))
+    grader_model: str = field(default_factory=lambda: _env(
+        "GRADER_MODEL",
+        "gemini-3.8-flash" if _env("GRADER_PROVIDER").lower() == "gemini" else "gpt-5.6-luna",
+    ))
     openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
     # Reasoning models mark more carefully at higher effort. Measured on a script
     # with correct method but wrong arithmetic, high effort caught the slip in 3
     # runs of 4 where the default caught it in 1. Set to "" to send no effort hint.
     grader_reasoning_effort: str = field(
-        default_factory=lambda: _env("GRADER_REASONING_EFFORT", "high").lower()
+        default_factory=lambda: os.environ.get("GRADER_REASONING_EFFORT", "high").strip().lower()
     )
     openrouter_api_key: str = field(default_factory=lambda: _env("OPENROUTER_API_KEY"))
 

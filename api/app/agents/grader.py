@@ -217,6 +217,76 @@ class OpenAIGrader:
         return _coerce(parse_json_object(raw, what="Grader"), part_max=part_max)
 
 
+# --------------------------------------------------------------------- Gemini
+
+class GeminiGrader:
+    """Text-only grading through the same SDK and credentials as the reader."""
+
+    name = "gemini"
+
+    def __init__(self, model: str | None = None) -> None:
+        self.model = model or settings.grader_model
+        self._client: Any | None = None
+
+    def _get_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        try:
+            from google import genai
+        except ImportError as exc:  # pragma: no cover
+            raise AgentError("google-genai is not installed") from exc
+
+        if settings.gemini_api_key:
+            self._client = genai.Client(api_key=settings.gemini_api_key)
+        elif settings.google_cloud_project:
+            self._client = genai.Client(
+                vertexai=True,
+                project=settings.google_cloud_project,
+                location=settings.google_cloud_location,
+            )
+        else:
+            raise AgentError(
+                "Gemini needs GEMINI_API_KEY, or GOOGLE_CLOUD_PROJECT with "
+                "application default credentials"
+            )
+        return self._client
+
+    async def grade(
+        self,
+        question_text: str,
+        transcript: str,
+        *,
+        part_max: dict[str, int] | None = None,
+    ) -> GradeResult:
+        from google.genai import types
+
+        client = self._get_client()
+        effort = settings.grader_reasoning_effort
+        if effort and effort not in {"low", "medium", "high"}:
+            raise AgentError("Gemini GRADER_REASONING_EFFORT must be low, medium, high or empty")
+        config = types.GenerateContentConfig(
+            system_instruction=CQ_GRADING_PROMPT,
+            response_mime_type="application/json",
+            # Thinking shares the output budget; leave enough room for the marks.
+            max_output_tokens=32768,
+            thinking_config=types.ThinkingConfig(thinking_level=effort) if effort else None,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
+        user_content = build_grading_input(question_text, transcript)
+
+        async def call() -> str:
+            response = await client.aio.models.generate_content(
+                model=self.model, contents=user_content, config=config,
+            )
+            text = getattr(response, "text", None)
+            if not text:
+                raise AgentError("Gemini grader returned empty content")
+            return text
+
+        raw = await with_retry(call, what=f"gemini grading ({self.model})")
+        return _coerce(parse_json_object(raw, what="Gemini grader"), part_max=part_max)
+
+
 # --------------------------------------------------------------------- stub
 
 class StubGrader:
@@ -262,6 +332,7 @@ class StubGrader:
 # --------------------------------------------------------------------- registry
 
 _GRADERS: dict[str, type] = {
+    "gemini": GeminiGrader,
     "openai": OpenAIGrader,
     "openrouter": OpenAIGrader,
     "stub": StubGrader,

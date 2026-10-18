@@ -292,8 +292,14 @@ appears outside its own adapter.
 
 ```bash
 OCR_PROVIDER=gemini      OCR_MODEL=gemini-3.7-flash
-GRADER_PROVIDER=openai   GRADER_MODEL=gpt-5.6-luna   GRADER_REASONING_EFFORT=high
+GRADER_PROVIDER=gemini   GRADER_MODEL=gemini-3.8-flash   GRADER_REASONING_EFFORT=high
 ```
+
+The Gemini grader receives only the question and transcript, using `GEMINI_API_KEY` or
+Vertex AI credentials (`GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`).
+`GRADER_REASONING_EFFORT` selects Gemini's thinking level (`low`, `medium`, `high`, or
+empty to use the model default). Reading and grading remain separate calls, even when
+both use Gemini. `openai` and `openrouter` remain available as grading providers.
 
 `stub` providers are built in, so the whole pipeline runs end to end with no API keys.
 
